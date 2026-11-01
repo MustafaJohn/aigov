@@ -169,13 +169,13 @@ LegalTech/
 
 ### 1. Backend:
 ```powershell
-cd D:\Amaan\LegalTech\backend
+cd backend
 .\venv\Scripts\uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
 ### 2. Frontend:
 ```powershell
-cd D:\Amaan\LegalTech\frontend
+cd frontend
 npm run dev
 ```
 Open your browser at `http://localhost:3000`.
