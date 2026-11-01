@@ -1,0 +1,133 @@
+{
+  "document": "test_01_commercial_memo.txt",
+  "description": "Commercial dispute memo with party aliases, banking, addresses and references",
+  "entities": [
+    {
+      "id": "e_vance",
+      "type": "PERSON",
+      "canonical": "Jonathan Vance",
+      "surface_forms": [
+        "Mr. Jonathan Vance",
+        "Jonathan Vance",
+        "Vance",
+        "J. Vance",
+        "Mr Vance"
+      ]
+    },
+    {
+      "id": "e_ward",
+      "type": "PERSON",
+      "canonical": "Elizabeth Ward",
+      "surface_forms": [
+        "Ms. Elizabeth Ward",
+        "Ward"
+      ]
+    },
+    {
+      "id": "e_pendelton",
+      "type": "PERSON",
+      "canonical": "Arthur Pendelton",
+      "surface_forms": [
+        "Master Arthur Pendelton",
+        "Pendelton"
+      ]
+    },
+    {
+      "id": "e_apex",
+      "type": "ORGANISATION",
+      "canonical": "Apex Capital Partners LLP",
+      "surface_forms": [
+        "Apex Capital Partners LLP"
+      ]
+    },
+    {
+      "id": "e_barclays",
+      "type": "ORGANISATION",
+      "canonical": "Barclays Bank PLC",
+      "surface_forms": [
+        "Barclays Bank PLC"
+      ]
+    },
+    {
+      "id": "e_chambers",
+      "type": "ORGANISATION",
+      "canonical": "Pendelton Chambers LLP",
+      "surface_forms": [
+        "Pendelton Chambers LLP"
+      ]
+    },
+    {
+      "id": "e_ni",
+      "type": "NI_NUMBER",
+      "canonical": "QQ 12 34 56 A",
+      "surface_forms": [
+        "QQ 12 34 56 A"
+      ]
+    },
+    {
+      "id": "e_sort",
+      "type": "SORT_CODE",
+      "canonical": "20-45-12",
+      "surface_forms": [
+        "20-45-12"
+      ]
+    },
+    {
+      "id": "e_account",
+      "type": "ACCOUNT_NUMBER",
+      "canonical": "84920193",
+      "surface_forms": [
+        "84920193"
+      ]
+    },
+    {
+      "id": "e_postcode",
+      "type": "UK_POSTCODE",
+      "canonical": "N5 2EF",
+      "surface_forms": [
+        "N5 2EF"
+      ]
+    },
+    {
+      "id": "e_address",
+      "type": "PHYSICAL_ADDRESS",
+      "canonical": "42 Highbury Grove, London",
+      "surface_forms": [
+        "42 Highbury Grove, London"
+      ]
+    },
+    {
+      "id": "e_email",
+      "type": "EMAIL",
+      "canonical": "ward@wardpartners.co.uk",
+      "surface_forms": [
+        "ward@wardpartners.co.uk"
+      ]
+    },
+    {
+      "id": "e_phone",
+      "type": "PHONE",
+      "canonical": "+44 20 7946 0192",
+      "surface_forms": [
+        "+44 20 7946 0192"
+      ]
+    },
+    {
+      "id": "e_amount",
+      "type": "MONETARY_AMOUNT",
+      "canonical": "£450,000",
+      "surface_forms": [
+        "£450,000"
+      ]
+    },
+    {
+      "id": "e_matter",
+      "type": "MATTER_REF",
+      "canonical": "MAT-2026-8841/LDN",
+      "surface_forms": [
+        "MAT-2026-8841/LDN",
+        "CLM-2026-00481"
+      ]
+    }
+  ]
+}

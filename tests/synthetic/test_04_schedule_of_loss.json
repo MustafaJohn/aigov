@@ -1,0 +1,106 @@
+{
+  "document": "test_04_schedule_of_loss.xlsx",
+  "description": "Schedule of loss spreadsheet with hidden partner ledger sheet, banking details, NI number and amounts",
+  "hidden_content": [
+    "Private Partner Ledger",
+    "Master Arthur Pendelton"
+  ],
+  "entities": [
+    {
+      "id": "e_vance",
+      "type": "PERSON",
+      "canonical": "Jonathan Vance",
+      "surface_forms": [
+        "Jonathan Vance"
+      ]
+    },
+    {
+      "id": "e_pendelton",
+      "type": "PERSON",
+      "canonical": "Arthur Pendelton",
+      "surface_forms": [
+        "Master Arthur Pendelton"
+      ]
+    },
+    {
+      "id": "e_bank",
+      "type": "ORGANISATION",
+      "canonical": "Barclays Bank PLC",
+      "surface_forms": [
+        "Barclays Bank PLC"
+      ]
+    },
+    {
+      "id": "e_sort",
+      "type": "SORT_CODE",
+      "canonical": "20-45-12",
+      "surface_forms": [
+        "20-45-12"
+      ]
+    },
+    {
+      "id": "e_account",
+      "type": "ACCOUNT_NUMBER",
+      "canonical": "84920193",
+      "surface_forms": [
+        "84920193"
+      ]
+    },
+    {
+      "id": "e_ni",
+      "type": "NI_NUMBER",
+      "canonical": "QQ 12 34 56 A",
+      "surface_forms": [
+        "QQ 12 34 56 A"
+      ]
+    },
+    {
+      "id": "e_postcode",
+      "type": "UK_POSTCODE",
+      "canonical": "N5 2EF",
+      "surface_forms": [
+        "N5 2EF"
+      ]
+    },
+    {
+      "id": "e_address",
+      "type": "PHYSICAL_ADDRESS",
+      "canonical": "42 Highbury Grove, London",
+      "surface_forms": [
+        "42 Highbury Grove, London"
+      ]
+    },
+    {
+      "id": "e_matter",
+      "type": "MATTER_REF",
+      "canonical": "CLM-2026-00481",
+      "surface_forms": [
+        "CLM-2026-00481"
+      ]
+    },
+    {
+      "id": "e_amt1",
+      "type": "MONETARY_AMOUNT",
+      "canonical": "£45,000",
+      "surface_forms": [
+        "£45,000"
+      ]
+    },
+    {
+      "id": "e_amt2",
+      "type": "MONETARY_AMOUNT",
+      "canonical": "£12,500",
+      "surface_forms": [
+        "£12,500"
+      ]
+    },
+    {
+      "id": "e_amt3",
+      "type": "MONETARY_AMOUNT",
+      "canonical": "£57,500",
+      "surface_forms": [
+        "£57,500"
+      ]
+    }
+  ]
+}

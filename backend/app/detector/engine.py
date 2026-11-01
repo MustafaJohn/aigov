@@ -114,6 +114,25 @@ class DetectionEngine:
                             is_active=True
                         ))
 
+            # 3b. Legal Heading Person Names (e.g. "WITNESS STATEMENT OF MEENA PATEL", "AFFIDAVIT OF JOHN DOE")
+            caps_heading_pattern = re.compile(
+                r"\b(?:STATEMENT|AFFIDAVIT|DEED|EVIDENCE|MEMORANDUM)\s+OF\s+([A-Z]{2,}(?:\s+[A-Z]{2,}){1,2})\b"
+            )
+            for match in caps_heading_pattern.finditer(text):
+                caps_name = match.group(1).strip()
+                jargon = get_random_jargon(caps_name, "PERSON", "XXX")
+                entities.append(DetectedEntity(
+                    id=f"ent_{uuid.uuid4().hex[:8]}",
+                    block_id=block.id,
+                    start=match.start(1),
+                    end=match.end(1),
+                    text=caps_name,
+                    type="PERSON",
+                    placeholder=jargon,
+                    confidence=0.95,
+                    is_active=True
+                ))
+
             # 4. First Name + Surname combinations in text (handles leading prepositions like "Between Jonathan Vance")
             LEADING_STOPWORDS = {"Between", "The", "This", "That", "In", "On", "Under", "Whereas", "Now", "Therefore", "Upon", "With", "After", "Before", "During", "Both", "Each", "All", "When", "While", "Dear", "From", "To"}
             seq_pattern = re.compile(r"\b[A-Z][a-z]+(?:[ \t]+[A-Z][a-z]+){1,3}\b")
@@ -147,7 +166,30 @@ class DetectionEngine:
                                 is_active=True
                             ))
 
-            # 5. Companies & Legal Entities
+            # 5. Standalone party surnames introduced in legal text (e.g. "Jenkins contacted me", "session with Jenkins")
+            party_verb_pattern = re.compile(
+                r"\b(?:with|against|by|from|to|contacted|attended|stated|confirmed|instructed)\s+([A-Z][a-z]{3,})\b|\b([A-Z][a-z]{3,})\s+(?:contacted|attended|stated|confirmed|instructed|agreed|signed|refused)\b"
+            )
+            for match in party_verb_pattern.finditer(text):
+                cand_surname = match.group(1) or match.group(2)
+                if cand_surname and cand_surname not in NAME_STOPWORDS and cand_surname not in LEADING_STOPWORDS:
+                    jargon = get_random_jargon(cand_surname, "PERSON", "XXX")
+                    word_offset = match.group().find(cand_surname)
+                    cand_start = match.start() + word_offset
+                    cand_end = cand_start + len(cand_surname)
+                    entities.append(DetectedEntity(
+                        id=f"ent_{uuid.uuid4().hex[:8]}",
+                        block_id=block.id,
+                        start=cand_start,
+                        end=cand_end,
+                        text=cand_surname,
+                        type="PERSON",
+                        placeholder=jargon,
+                        confidence=0.90,
+                        is_active=True
+                    ))
+
+            # 6. Companies & Legal Entities
             for match in COMPANY_REGEX.finditer(text):
                 match_text = match.group().strip()
                 jargon = get_random_jargon(match_text, "ORGANISATION", "XYZ")
@@ -159,11 +201,11 @@ class DetectionEngine:
                     text=match_text,
                     type="ORGANISATION",
                     placeholder=jargon,
-                    confidence=0.94,
+                    confidence=0.96,
                     is_active=True
                 ))
 
-            # 6. Recognized Banks & Financial Institutions
+            # 7. Recognized Banks & Financial Institutions
             for match in BANK_REGEX.finditer(text):
                 match_text = match.group().strip()
                 jargon = get_random_jargon(match_text, "ORGANISATION", "XYZ")
@@ -246,10 +288,20 @@ class DetectionEngine:
         for ent in entities:
             blocks_map.setdefault(ent.block_id, []).append(ent)
 
+        ORG_INDICATORS = ("School", "College", "University", "Care Home", "Community Centre", "Hospital", "Clinic", "Council", "LLP", "Ltd", "PLC", "Chambers", "Bank", "Holdings", "Partners", "Group", "Primary School")
+
         result: List[DetectedEntity] = []
         for block_id, ent_list in blocks_map.items():
-            # Sort by start asc, then longer span first
-            sorted_ents = sorted(ent_list, key=lambda x: (x.start, -(x.end - x.start)))
+            # If an entity was tagged as PERSON but contains organisation indicators, correct it to ORGANISATION
+            for ent in ent_list:
+                if ent.type == "PERSON" and any(ind in ent.text for ind in ORG_INDICATORS):
+                    ent.type = "ORGANISATION"
+
+            # Sort by start asc, longer span first, ORGANISATION before PERSON on tie
+            sorted_ents = sorted(
+                ent_list,
+                key=lambda x: (x.start, -(x.end - x.start), 0 if x.type == "ORGANISATION" else 1)
+            )
             kept: List[DetectedEntity] = []
             last_end = -1
             for ent in sorted_ents:

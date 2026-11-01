@@ -1,0 +1,106 @@
+{
+  "document": "test_03_employment_contract.docx",
+  "description": "Executive service agreement in DOCX with author metadata, table, and compensation details",
+  "hidden_content": [
+    "Master Arthur Pendelton"
+  ],
+  "entities": [
+    {
+      "id": "e_sterling",
+      "type": "PERSON",
+      "canonical": "Marcus Sterling",
+      "surface_forms": [
+        "Marcus Sterling",
+        "Sterling"
+      ]
+    },
+    {
+      "id": "e_eleanor",
+      "type": "PERSON",
+      "canonical": "Eleanor Vance",
+      "surface_forms": [
+        "Eleanor Vance"
+      ]
+    },
+    {
+      "id": "e_company",
+      "type": "ORGANISATION",
+      "canonical": "Oakridge Financial Holdings Ltd",
+      "surface_forms": [
+        "Oakridge Financial Holdings Ltd"
+      ]
+    },
+    {
+      "id": "e_postcode",
+      "type": "UK_POSTCODE",
+      "canonical": "W1J 6AA",
+      "surface_forms": [
+        "W1J 6AA"
+      ]
+    },
+    {
+      "id": "e_address",
+      "type": "PHYSICAL_ADDRESS",
+      "canonical": "10 Berkeley Square, London",
+      "surface_forms": [
+        "10 Berkeley Square, London"
+      ]
+    },
+    {
+      "id": "e_ni",
+      "type": "NI_NUMBER",
+      "canonical": "JG 72 38 19 B",
+      "surface_forms": [
+        "JG 72 38 19 B"
+      ]
+    },
+    {
+      "id": "e_salary",
+      "type": "MONETARY_AMOUNT",
+      "canonical": "£185,000",
+      "surface_forms": [
+        "£185,000"
+      ]
+    },
+    {
+      "id": "e_sort",
+      "type": "SORT_CODE",
+      "canonical": "40-12-76",
+      "surface_forms": [
+        "40-12-76"
+      ]
+    },
+    {
+      "id": "e_account",
+      "type": "ACCOUNT_NUMBER",
+      "canonical": "91823019",
+      "surface_forms": [
+        "91823019"
+      ]
+    },
+    {
+      "id": "e_email",
+      "type": "EMAIL",
+      "canonical": "vance@oakridge.co.uk",
+      "surface_forms": [
+        "vance@oakridge.co.uk"
+      ]
+    },
+    {
+      "id": "e_phone",
+      "type": "PHONE",
+      "canonical": "020 7946 0883",
+      "surface_forms": [
+        "020 7946 0883"
+      ]
+    },
+    {
+      "id": "e_ref",
+      "type": "MATTER_REF",
+      "canonical": "REF-2026-7718",
+      "surface_forms": [
+        "REF-2026-7718"
+      ]
+    }
+  ]
+}

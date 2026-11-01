@@ -1,0 +1,104 @@
+{
+  "document": "test_05_court_order.pdf",
+  "description": "High Court consent order in PDF format with judge, parties, aliases, banking details, and service addresses",
+  "entities": [
+    {
+      "id": "e_pendelton",
+      "type": "PERSON",
+      "canonical": "Arthur Pendelton",
+      "surface_forms": [
+        "Master Arthur Pendelton",
+        "Pendelton"
+      ]
+    },
+    {
+      "id": "e_vance",
+      "type": "PERSON",
+      "canonical": "Jonathan Vance",
+      "surface_forms": [
+        "Mr. Jonathan Vance",
+        "Vance"
+      ]
+    },
+    {
+      "id": "e_ward",
+      "type": "PERSON",
+      "canonical": "Elizabeth Ward",
+      "surface_forms": [
+        "Ms. Elizabeth Ward"
+      ]
+    },
+    {
+      "id": "e_apex",
+      "type": "ORGANISATION",
+      "canonical": "Apex Capital Partners LLP",
+      "surface_forms": [
+        "Apex Capital Partners LLP"
+      ]
+    },
+    {
+      "id": "e_amount",
+      "type": "MONETARY_AMOUNT",
+      "canonical": "£350,000",
+      "surface_forms": [
+        "£350,000"
+      ]
+    },
+    {
+      "id": "e_sort",
+      "type": "SORT_CODE",
+      "canonical": "20-45-12",
+      "surface_forms": [
+        "20-45-12"
+      ]
+    },
+    {
+      "id": "e_account",
+      "type": "ACCOUNT_NUMBER",
+      "canonical": "84920193",
+      "surface_forms": [
+        "84920193"
+      ]
+    },
+    {
+      "id": "e_postcode",
+      "type": "UK_POSTCODE",
+      "canonical": "N5 2EF",
+      "surface_forms": [
+        "N5 2EF"
+      ]
+    },
+    {
+      "id": "e_address",
+      "type": "PHYSICAL_ADDRESS",
+      "canonical": "42 Highbury Grove, London",
+      "surface_forms": [
+        "42 Highbury Grove, London"
+      ]
+    },
+    {
+      "id": "e_email",
+      "type": "EMAIL",
+      "canonical": "ward@wardpartners.co.uk",
+      "surface_forms": [
+        "ward@wardpartners.co.uk"
+      ]
+    },
+    {
+      "id": "e_phone",
+      "type": "PHONE",
+      "canonical": "020 7946 0192",
+      "surface_forms": [
+        "020 7946 0192"
+      ]
+    },
+    {
+      "id": "e_claim",
+      "type": "MATTER_REF",
+      "canonical": "CLM-2026-00481",
+      "surface_forms": [
+        "CLM-2026-00481"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,113 @@
+{
+  "document": "test_02_patel_family_law.txt",
+  "description": "Family court witness statement exercising Mrs Patel regression, child name, school, surname aliases, driving licence, passport and orgs without Ltd",
+  "entities": [
+    {
+      "id": "e_meena",
+      "type": "PERSON",
+      "canonical": "Meena Patel",
+      "surface_forms": [
+        "MEENA PATEL",
+        "Mrs Patel",
+        "Patel"
+      ]
+    },
+    {
+      "id": "e_priya",
+      "type": "PERSON",
+      "canonical": "Priya Patel",
+      "surface_forms": [
+        "Priya Patel"
+      ]
+    },
+    {
+      "id": "e_jenkins",
+      "type": "PERSON",
+      "canonical": "Jenkins",
+      "surface_forms": [
+        "Jenkins"
+      ]
+    },
+    {
+      "id": "e_vance",
+      "type": "PERSON",
+      "canonical": "David Vance",
+      "surface_forms": [
+        "David Vance",
+        "Vance"
+      ]
+    },
+    {
+      "id": "e_school",
+      "type": "ORGANISATION",
+      "canonical": "St Peter's Catholic Primary School",
+      "surface_forms": [
+        "St Peter's Catholic Primary School"
+      ]
+    },
+    {
+      "id": "e_care_home",
+      "type": "ORGANISATION",
+      "canonical": "Greenwood Care Home",
+      "surface_forms": [
+        "Greenwood Care Home"
+      ]
+    },
+    {
+      "id": "e_centre",
+      "type": "ORGANISATION",
+      "canonical": "Oakridge Community Centre",
+      "surface_forms": [
+        "Oakridge Community Centre"
+      ]
+    },
+    {
+      "id": "e_postcode",
+      "type": "UK_POSTCODE",
+      "canonical": "B13 8QA",
+      "surface_forms": [
+        "B13 8QA"
+      ]
+    },
+    {
+      "id": "e_address",
+      "type": "PHYSICAL_ADDRESS",
+      "canonical": "14 Elmwood Road, Birmingham",
+      "surface_forms": [
+        "14 Elmwood Road, Birmingham"
+      ]
+    },
+    {
+      "id": "e_licence",
+      "type": "DRIVING_LICENCE",
+      "canonical": "PATEL805124P99AB",
+      "surface_forms": [
+        "PATEL805124P99AB"
+      ]
+    },
+    {
+      "id": "e_passport",
+      "type": "PASSPORT",
+      "canonical": "549201948",
+      "surface_forms": [
+        "549201948"
+      ]
+    },
+    {
+      "id": "e_case_ref",
+      "type": "MATTER_REF",
+      "canonical": "CAS-2026-9912",
+      "surface_forms": [
+        "CAS-2026-9912"
+      ]
+    },
+    {
+      "id": "e_amount",
+      "type": "MONETARY_AMOUNT",
+      "canonical": "£1,250",
+      "surface_forms": [
+        "£1,250"
+      ]
+    }
+  ]
+}

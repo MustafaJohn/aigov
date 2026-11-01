@@ -14,8 +14,8 @@ PATTERNS = {
         "jargon_prefix": "XYZ"
     },
     "ACCOUNT_NUMBER": {
-        # Fix: Require context (Account / A/C / No / Bank) rather than matching any random 8 digits
-        "regex": re.compile(r"(?i:\b(?:acc(?:ount)?\.?|a\/c|no\.?|number)\s*[:#-]?\s*)(\d{8,10})\b"),
+        # Require bank/account context: Account, Account Number, Account No, A/C, Bank Acc
+        "regex": re.compile(r"(?i:\b(?:acc(?:ount)?(?:\s+(?:no\.?|number))?|a\/c|bank\s+acc(?:ount)?)\s*[:#\-|]?\s*)(\d{8,10})\b"),
         "label": "Bank Account No.",
         "jargon_prefix": "XXX"
     },
@@ -42,12 +42,12 @@ PATTERNS = {
         "jargon_prefix": "XXX"
     },
     "PHONE": {
-        "regex": re.compile(r"\b(?:(?:\+44\s?|0)(?:20\s?\d{4}|1\d{3}\s?\d{3}|7\d{3}\s?\d{3})\s?\d{3,4}|\+?[0-9]{1,3}[-.\s]\(?\d{2,4}\)?[-.\s]\d{3}[-.\s]\d{3,4})\b"),
+        "regex": re.compile(r"(?<!\w)(?:(?:\+44\s?|0)(?:20\s?\d{4}|1\d{3}\s?\d{3}|7\d{3}\s?\d{3})\s?\d{3,4}|\+?[0-9]{1,3}[-.\s]\(?\d{2,4}\)?[-.\s]\d{3}[-.\s]\d{3,4})\b"),
         "label": "Phone Number",
         "jargon_prefix": "XYZ"
     },
     "PASSPORT": {
-        "regex": re.compile(r"(?i:\b(?:passport|ppt|passport\s+no\.?)\s*[:#-]?\s*)([A-Z0-9]{8,10})\b"),
+        "regex": re.compile(r"(?i:\b(?:passport|ppt|passport\s+no\.?|passport\s+number)\s*[:#\-–]?\s*)([A-Z0-9]{8,10})\b"),
         "label": "Passport Number",
         "jargon_prefix": "XXX"
     },
