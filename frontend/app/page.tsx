@@ -14,7 +14,7 @@ import { EntityDatabaseTable } from '../components/EntityDatabaseTable';
 import { NotesPanel } from '../components/NotesPanel';
 import { ExportModal } from '../components/ExportModal';
 import { DocumentIR, DetectedEntity, LegalNote } from '../lib/types';
-import { compileProtectedDocument, generateNextJargon } from '../lib/restore';
+import { compileProtectedDocument, generateNextJargon, downloadTextFile } from '../lib/restore';
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
 
@@ -49,6 +49,7 @@ export default function Home() {
   const [includeHidden, setIncludeHidden] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [currentProvider, setCurrentProvider] = useState<string>('demo');
 
   // Load notes from localStorage on mount
@@ -249,6 +250,32 @@ export default function Home() {
     }
   };
 
+  // 1-Click Save / Download Protected Document
+  const handleSaveDocument = () => {
+    if (!docIR) return;
+    const compiled = compileProtectedDocument(docIR.blocks, entities, includeHidden);
+    downloadTextFile(compiled, `protected-${docIR.source.filename || 'document'}.txt`);
+    try {
+      localStorage.setItem('lexgateway_saved_doc', JSON.stringify({
+        doc_id: docIR.doc_id,
+        filename: docIR.source.filename,
+        entitiesCount: entities.length,
+        saved_at: new Date().toISOString()
+      }));
+    } catch {
+      // Ignore
+    }
+    setToastMessage(`Document "${docIR.source.filename}" and its protection settings have been saved!`);
+    setTimeout(() => setToastMessage(null), 4000);
+  };
+
+  // Quick In-Line Note Creation (without navigating away)
+  const handleQuickAddNote = (title: string, content: string) => {
+    handleAddNote({ title, content, category: 'General' });
+    setToastMessage(`Note "${title}" added to matter workspace!`);
+    setTimeout(() => setToastMessage(null), 3000);
+  };
+
   return (
     <div className="flex h-screen bg-white text-[#37352f] overflow-hidden font-sans">
       {/* 1. Left Notion-Style Collapsible Sidebar */}
@@ -286,6 +313,7 @@ export default function Home() {
           onOpenAICopilot={() => setIsCopilotOpen(!isCopilotOpen)}
           isCopilotOpen={isCopilotOpen}
           onOpenExportModal={() => setIsExportModalOpen(true)}
+          onSaveDocument={handleSaveDocument}
           onNewIntake={handleReset}
           hasDocument={!!docIR}
         />
@@ -293,6 +321,18 @@ export default function Home() {
         {/* Scrollable Document Canvas */}
         <main className="flex-1 overflow-y-auto px-4 sm:px-8 lg:px-12 py-6 bg-white">
           <div className="max-w-6xl mx-auto w-full space-y-4">
+            {toastMessage && (
+              <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs rounded-xl p-3 flex items-center justify-between shadow-2xs animate-in fade-in duration-150">
+                <span className="font-medium">✓ {toastMessage}</span>
+                <button
+                  onClick={() => setToastMessage(null)}
+                  className="text-emerald-700 font-bold hover:underline cursor-pointer ml-4"
+                >
+                  Dismiss
+                </button>
+              </div>
+            )}
+
             {errorMessage && (
               <div className="bg-rose-50 border border-rose-200 text-rose-800 text-xs rounded-xl p-3 flex items-center justify-between shadow-2xs">
                 <span>{errorMessage}</span>
@@ -336,6 +376,8 @@ export default function Home() {
                     includeHidden={includeHidden}
                     onToggleIncludeHidden={() => setIncludeHidden(!includeHidden)}
                     onProceedToAI={() => setActiveView('ai')}
+                    onSaveDocument={handleSaveDocument}
+                    onAddQuickNote={handleQuickAddNote}
                   />
                 )}
 

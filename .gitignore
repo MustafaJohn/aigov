@@ -5,3 +5,6 @@ backend/venv/
 !.env.example
 frontend/node_modules/
 frontend/.next/
+
+old_files/
+

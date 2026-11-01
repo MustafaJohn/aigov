@@ -1,3 +1,4 @@
+import re
 import httpx
 from typing import Optional
 from app.models import SummarizeRequest, SummarizeResponse
@@ -15,70 +16,69 @@ async def execute_llm_summary(req: SummarizeRequest) -> SummarizeResponse:
     )
 
     # 1. Mock / Demo Mode for instant offline testing without API keys
+    # Dynamically analyzes ANY uploaded document (contracts, notarised deeds, court forms, letters, etc.)
     if req.api_key.strip() in ["", "demo", "mock", "test"]:
+        doc_text = req.protected_text.strip()
+        lines = [line.strip() for line in doc_text.splitlines() if line.strip()]
         lower_prompt = prompt.lower()
+
+        # Find any masked tokens in the document (e.g. [PERSON 1], [ORG 2], XXX_1, XYZ_2)
+        tokens_found = list(set(re.findall(r"(?:\[[A-Z_\s0-9]+\]|XXX_\d+|XYZ_\d+)", doc_text)))
+        title_context = lines[0] if lines else "Uploaded Document"
+
+        # Separate heading and body lines
+        body_lines = lines[1:] if len(lines) > 1 else lines
 
         if "risk" in lower_prompt or "liabilit" in lower_prompt:
             mock_summary = (
-                "### ⚖️ Legal Risk & Liability Analysis\n\n"
-                "**1. Core Exposure & Settlement Scope**\n"
-                "- The proposed settlement involving **XYZ_1** (Claimant) and **XXX_1** (Respondent) resolves claims under **XXX_11**.\n"
-                "- Payment of **XYZ_10** into escrow must be conditioned upon irrevocable withdrawal of High Court proceedings with no admission of liability.\n\n"
-                "**2. Regulatory & Banking Risks**\n"
-                "- Transfers to banking facility **XYZ_4** (Sort Code: **XXX_5**, Account: **XYZ_6**) require verification against UK Money Laundering Regulations (MLR 2017) and source of funds verification.\n\n"
-                "**3. Enforcement & Undertakings Vulnerability**\n"
-                "- Managing partner sign-off is mandatory under SRA Standards & Regulations. Failure to execute countersignatures by the target deadline exposes **XYZ_1** to revived litigation."
+                f"### ⚖️ Legal Risk & Liability Analysis\n\n"
+                f"**Document Context:** {title_context}\n\n"
+                f"**1. Core Legal Risks & Exposure:**\n"
+                f"- Review of protected text indicates active obligations involving {len(tokens_found)} masked parties and credentials.\n"
+                f"- Primary substantive clauses under review:\n"
             )
-        elif "obligation" in lower_prompt or "deadline" in lower_prompt or "action item" in lower_prompt:
+            for l in body_lines[:4]:
+                mock_summary += f"  - *\"{l[:140]}{'...' if len(l) > 140 else ''}\"*\n"
+
+            mock_summary += (
+                f"\n**2. Governance & Compliance Assessment:**\n"
+                f"- All {len(tokens_found)} sensitive identifiers remain safely masked.\n"
+                f"- Recommend formal verification of all undertakings and regulatory preconditions before execution."
+            )
+
+        elif "obligation" in lower_prompt or "deadline" in lower_prompt:
             mock_summary = (
-                "### 📅 Key Obligations & Procedural Deadlines\n\n"
-                "| Party | Obligation / Action Item | Deadline / Condition |\n"
-                "|---|---|---|\n"
-                "| **XYZ_1** | Tender settlement sum of **XYZ_10** into client escrow | Prior to deed execution |\n"
-                "| **XXX_1** | Formal withdrawal of London High Court Action **XXX_11** | Simultaneous with escrow receipt |\n"
-                "| **XXX_1** & **XXX_7** | Sign and countersign formal deed of execution | Strict deadline: **30 October 2026** |\n"
-                "| Managing Partner | Formal SRA regulatory sign-off on undertakings | Condition precedent to disbursement |"
+                f"### 📅 Key Obligations, Terms & Timelines\n\n"
+                f"**Document Context:** {title_context}\n\n"
+                f"| # | Substantive Term / Provision | Protection Status |\n"
+                f"|---|---|---|\n"
             )
-        elif "memo" in lower_prompt or "advice" in lower_prompt:
-            mock_summary = (
-                "### 📝 Client Advice Memorandum\n\n"
-                "**TO:** Client Executive Committee / In-House Legal\n"
-                "**FROM:** Legal Advisory Team\n"
-                "**MATTER:** Commercial Dispute Resolution & Escrow Settlement (**XXX_11**)\n\n"
-                "**1. Executive Recommendation**\n"
-                "We recommend proceeding with the drafted settlement structure subject to two key conditions: (i) holding the **XYZ_10** disbursement until the formal notice of discontinuance is stamped by the court, and (ii) obtaining SRA-compliant identity checks on **XXX_1**.\n\n"
-                "**2. Tactical Posture**\n"
-                "Settling at this stage averts protracted High Court trial costs. The terms appropriately extinguish all respondent claims across all jurisdictions."
+            for idx, l in enumerate(body_lines[:5], start=1):
+                clean_l = l.replace("|", "-")
+                mock_summary += f"| {idx} | {clean_l[:120]} | Masked & Compliant |\n"
+            mock_summary += (
+                f"\n**Summary:** Identified key provisions across {len(lines)} blocks. Zero raw PII exposed."
             )
-        elif "rebuttal" in lower_prompt or "counter" in lower_prompt or "defence" in lower_prompt:
-            mock_summary = (
-                "### 🥊 Rebuttal Points & Procedural Defences\n\n"
-                "1. **Jurisdictional & Standing Defects:** The claims in **XXX_11** fail to establish direct contractual privity for damages exceeding the verified consideration.\n"
-                "2. **Mitigation Failure:** The opposing party has not demonstrated reasonable steps to mitigate alleged losses following the initial commercial rupture.\n"
-                "3. **Conditionality of Offer:** Any concessions concerning **XYZ_10** remain strictly *Without Prejudice Save as to Costs* and cannot be cited in open court if negotiations collapse."
-            )
-        elif "timeline" in lower_prompt or "chronolog" in lower_prompt:
-            mock_summary = (
-                "### ⏳ Chronological Events & Timeline\n\n"
-                "- **Prior to Dispute:** Commercial dealings between Claimant **XYZ_1** and Respondent **XXX_1**.\n"
-                "- **Litigation Commencement:** Filing of London High Court Action **XXX_11**.\n"
-                "- **19 October 2026:** Confidential legal memorandum issued evaluating settlement proposal of **XYZ_10**.\n"
-                "- **Upcoming (30 October 2026):** Execution deadline for deed signed by **XXX_1** and counsel **XXX_7**."
-            )
+
         else:
+            # Universal document summary for any contract, deed, court filing, or general document
             mock_summary = (
-                "### 📋 Executive Legal Summary (Redacted Context)\n\n"
-                "**1. Parties Involved:**\n"
-                "- **Claimant:** **XYZ_1**\n"
-                "- **Respondent:** **XXX_1** (represented by legal counsel **XXX_7** at **XYZ_8**)\n\n"
-                "**2. Core Dispute & Subject Matter:**\n"
-                "- The matter concerns ongoing commercial dispute and litigation under High Court Action **XXX_11**.\n\n"
-                "**3. Proposed Terms & Financial Consideration:**\n"
-                "- **XYZ_1** agrees to tender a settlement sum of **XYZ_10** into client escrow at banking facility **XYZ_4** (Sort Code: **XXX_5**, Account: **XYZ_6**).\n"
-                "- In exchange, **XXX_1** will permanently withdraw all claims in London High Court Action **XXX_11**.\n\n"
-                "**4. Compliance & Execution Requirements:**\n"
-                "- Senior managing partner sign-off required for SRA undertakings.\n"
-                "- Deed of execution must be signed and countersigned by **30 October 2026**."
+                f"### 📋 Executive Summary (Document-Grounded)\n\n"
+                f"**Document Title / Heading:** {title_context}\n\n"
+                f"**1. Factual Background & Context:**\n"
+            )
+            for l in body_lines[:3]:
+                mock_summary += f"- {l}\n"
+
+            if len(body_lines) > 3:
+                mock_summary += f"\n**2. Core Provisions, Rights & Terms:**\n"
+                for l in body_lines[3:7]:
+                    mock_summary += f"- {l}\n"
+
+            mock_summary += (
+                f"\n**3. PII & Entity Governance:**\n"
+                f"- **{len(tokens_found)} sensitive entities** were safely protected in this document.\n"
+                f"- No unmasked client details, account numbers, or party identifiers were transmitted to external AI APIs."
             )
 
         return SummarizeResponse(

@@ -23,6 +23,7 @@ interface NotionTopBarProps {
   onOpenAICopilot: () => void;
   isCopilotOpen: boolean;
   onOpenExportModal: () => void;
+  onSaveDocument?: () => void;
   onNewIntake: () => void;
   hasDocument: boolean;
 }
@@ -35,6 +36,7 @@ export const NotionTopBar: React.FC<NotionTopBarProps> = ({
   onOpenAICopilot,
   isCopilotOpen,
   onOpenExportModal,
+  onSaveDocument,
   onNewIntake,
   hasDocument,
 }) => {
@@ -95,6 +97,18 @@ export const NotionTopBar: React.FC<NotionTopBarProps> = ({
       <div className="flex items-center space-x-1.5">
         {hasDocument && (
           <>
+            {/* Quick Save Protected Document */}
+            {onSaveDocument && (
+              <button
+                onClick={onSaveDocument}
+                className="flex items-center space-x-1.5 px-3 py-1 rounded-md text-xs font-semibold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 transition-all cursor-pointer shadow-2xs"
+                title="Save & Download Protected Document"
+              >
+                <Check className="w-3.5 h-3.5 text-emerald-600" />
+                <span>Save</span>
+              </button>
+            )}
+
             {/* Toggle AI Copilot Side Drawer */}
             <button
               onClick={onOpenAICopilot}

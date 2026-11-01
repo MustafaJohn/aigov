@@ -30,6 +30,33 @@ export const GateBanner: React.FC<GateBannerProps> = ({ report }) => {
     );
   }
 
+  // Handle Ready with Warnings (e.g. Scanned pages, interactive form fields, metadata)
+  if (report.status === 'READY_WITH_WARNINGS' && report.warnings.length > 0) {
+    return (
+      <div className="bg-amber-50/80 border border-amber-200/90 rounded-xl p-3 text-amber-950 shadow-2xs space-y-1.5">
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <div className="flex items-center space-x-2">
+            <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
+            <span className="text-xs font-bold uppercase tracking-wider text-amber-900 bg-amber-100 px-2 py-0.5 rounded">
+              Intake Notice
+            </span>
+            <span className="text-xs font-semibold text-amber-900">
+              {report.summary}
+            </span>
+          </div>
+          <span className="text-[11px] font-medium text-amber-800 bg-amber-100/60 border border-amber-200 px-2 py-0.5 rounded-full">
+            Review Advised
+          </span>
+        </div>
+        <div className="text-[11px] text-amber-800 pl-4 space-y-0.5">
+          {report.warnings.map((w, idx) => (
+            <p key={idx}>• {w}</p>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   // Smooth, non-intrusive status for ready documents (No annoying warnings or roadblocks)
   return (
     <div className="bg-white border border-slate-200 rounded-xl px-4 py-2.5 flex items-center justify-between shadow-2xs flex-wrap gap-2">

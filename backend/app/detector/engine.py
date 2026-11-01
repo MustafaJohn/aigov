@@ -114,24 +114,38 @@ class DetectionEngine:
                             is_active=True
                         ))
 
-            # 4. First Name + Surname combinations in text
-            name_pattern = re.compile(r"\b([A-Z][a-z]+)\s+([A-Z][a-z]+)\b")
-            for match in name_pattern.finditer(text):
-                first_name = match.group(1)
-                full_match = match.group(0)
-                if first_name in COMMON_FIRST_NAMES and full_match not in NAME_STOPWORDS:
-                    jargon = get_random_jargon(full_match, "PERSON", "XXX")
-                    entities.append(DetectedEntity(
-                        id=f"ent_{uuid.uuid4().hex[:8]}",
-                        block_id=block.id,
-                        start=match.start(),
-                        end=match.end(),
-                        text=full_match,
-                        type="PERSON",
-                        placeholder=jargon,
-                        confidence=0.88,
-                        is_active=True
-                    ))
+            # 4. First Name + Surname combinations in text (handles leading prepositions like "Between Jonathan Vance")
+            LEADING_STOPWORDS = {"Between", "The", "This", "That", "In", "On", "Under", "Whereas", "Now", "Therefore", "Upon", "With", "After", "Before", "During", "Both", "Each", "All", "When", "While", "Dear", "From", "To"}
+            seq_pattern = re.compile(r"\b[A-Z][a-z]+(?:[ \t]+[A-Z][a-z]+){1,3}\b")
+            for match in seq_pattern.finditer(text):
+                matched_str = match.group()
+                words = matched_str.split()
+                start_offset = 0
+                while words and words[0] in LEADING_STOPWORDS:
+                    start_offset += len(words[0]) + 1
+                    words.pop(0)
+
+                if len(words) >= 2:
+                    cand_name = " ".join(words)
+                    first_w = words[0]
+                    # Check if first word is in common names OR if candidate is not a generic title
+                    if (first_w in COMMON_FIRST_NAMES or len(words) in [2, 3]) and cand_name not in NAME_STOPWORDS:
+                        # Ensure not part of an organization (e.g. Barclays Bank or High Court)
+                        if not any(sw in cand_name for sw in ["Court", "Bank", "LLP", "Ltd", "PLC", "Council", "Chambers", "Service", "Department"]):
+                            jargon = get_random_jargon(cand_name, "PERSON", "XXX")
+                            cand_start = match.start() + start_offset
+                            cand_end = cand_start + len(cand_name)
+                            entities.append(DetectedEntity(
+                                id=f"ent_{uuid.uuid4().hex[:8]}",
+                                block_id=block.id,
+                                start=cand_start,
+                                end=cand_end,
+                                text=cand_name,
+                                type="PERSON",
+                                placeholder=jargon,
+                                confidence=0.91,
+                                is_active=True
+                            ))
 
             # 5. Companies & Legal Entities
             for match in COMPANY_REGEX.finditer(text):
@@ -164,6 +178,54 @@ class DetectionEngine:
                     confidence=0.95,
                     is_active=True
                 ))
+
+            # 7. Document Header / CV Name Detection (checks the first 3 blocks for standalone full names)
+            if block.order < 3 and len(text.split()) in [2, 3, 4]:
+                clean_header = text.strip()
+                header_words = clean_header.split()
+                if all(w[0].isupper() and w.isalpha() for w in header_words):
+                    if clean_header not in NAME_STOPWORDS and not any(sw in clean_header for sw in ["Court", "Legal", "Curriculum", "Resume", "Dispute", "Agreement", "Terms", "Schedule"]):
+                        jargon = get_random_jargon(clean_header, "PERSON", "XXX")
+                        entities.append(DetectedEntity(
+                            id=f"ent_{uuid.uuid4().hex[:8]}",
+                            block_id=block.id,
+                            start=0,
+                            end=len(clean_header),
+                            text=clean_header,
+                            type="PERSON",
+                            placeholder=jargon,
+                            confidence=0.96,
+                            is_active=True
+                        ))
+
+        # 8. Alias Resolution Pass (detects subsequent surname-only and initial mentions e.g. "Vance", "Mr Vance", "J. Vance")
+        known_persons = [e for e in entities if e.type == "PERSON"]
+        surname_to_placeholder: Dict[str, str] = {}
+        for pe in known_persons:
+            words = pe.text.strip().split()
+            if len(words) >= 2:
+                surname = words[-1].strip()
+                if len(surname) >= 3 and surname not in NAME_STOPWORDS:
+                    surname_to_placeholder[surname] = pe.placeholder
+
+        for surname, placeholder in surname_to_placeholder.items():
+            alias_pattern = re.compile(
+                rf"\b(?:(?:Mr\.?|Mrs\.?|Ms\.?|Miss|Dr\.?)\s+|[A-Z]\.?\s+)?{re.escape(surname)}\b"
+            )
+            for block in doc_ir.blocks:
+                for match in alias_pattern.finditer(block.text):
+                    match_str = match.group()
+                    entities.append(DetectedEntity(
+                        id=f"ent_{uuid.uuid4().hex[:8]}",
+                        block_id=block.id,
+                        start=match.start(),
+                        end=match.end(),
+                        text=match_str,
+                        type="PERSON",
+                        placeholder=placeholder,
+                        confidence=0.93,
+                        is_active=True
+                    ))
 
         # De-duplicate overlapping entity spans within each block
         deduped = self._deduplicate_spans(entities)

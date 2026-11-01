@@ -87,11 +87,15 @@ def intake_file(filename: str, content: bytes) -> DocumentIR:
             )
         )
 
-    # Determine Gate Outcome: If text blocks extracted, document is READY immediately.
+    # Determine Gate Outcome: Ready, Ready with warnings, or Blocked
     if len(blocks) == 0:
         status = "BLOCKED"
         gate_reason = "No extractable text or structure found in document."
         summary = "File contained zero readable text blocks."
+    elif len(warnings) > 0:
+        status = "READY_WITH_WARNINGS"
+        gate_reason = None
+        summary = f"Document ready with warnings: {len(blocks)} blocks extracted."
     else:
         status = "READY"
         gate_reason = None

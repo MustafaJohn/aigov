@@ -268,6 +268,10 @@ export const NotesPanel: React.FC<NotesPanelProps> = ({
                     {CATEGORY_EMOJIS[activeNote.category || 'General']} {activeNote.category || 'General'}
                   </span>
                   <span>Created: {activeNote.created_at}</span>
+                  <span className="text-[10px] text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded flex items-center gap-1 font-medium">
+                    <Check className="w-2.5 h-2.5 text-emerald-600" />
+                    Saved
+                  </span>
                 </div>
 
                 <div className="flex items-center space-x-1">
