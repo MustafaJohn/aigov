@@ -56,7 +56,7 @@ export const DocumentHeader: React.FC<DocumentHeaderProps> = ({
           <div className="flex items-center space-x-1.5">
             <span className="text-[11px] font-medium">Protection:</span>
             <span className="font-mono text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded text-[10px] font-bold">
-              XXX / XYZ Jargon
+              Typed [TYPE N]
             </span>
           </div>
 

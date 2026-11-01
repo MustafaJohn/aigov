@@ -38,7 +38,7 @@ export const RedactedOnlyView: React.FC<RedactedOnlyViewProps> = ({
           <ShieldCheck className="w-4 h-4 text-emerald-600" />
           <span className="font-bold text-[#37352f]">Safe Redacted Document</span>
           <span className="text-[#787774]">
-            ({activeCount} PII tokens replaced with XXX / XYZ jargon)
+            ({activeCount} PII tokens replaced with typed placeholders)
           </span>
         </div>
 

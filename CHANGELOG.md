@@ -4,7 +4,19 @@ A high-level record of architectural decisions, customer feedback fixes, and del
 
 ---
 
-## [Unreleased / Latest] - Project Legal Branding & File Cleanup
+## [2026-11-02] - Deliverables 2 & 4: Typed Placeholders & Pattern De-hardcoding
+- **Decision:** Replaced random jargon tokens (`XXX_1`, `XYZ_2`) with semantic typed placeholders (`[PERSON 1]`, `[ORG 2]`, `[ACCOUNT 1]`).
+- **Reason:** In legal analysis, the AI must understand semantic roles (employer vs employee, bank vs claim amount) while keeping client data 100% masked.
+- **Key Changes:**
+  - Implemented `EntityRegistry` in `engine.py` with universal dynamic type fallback (zero crashes on unknown/custom types) and alias unification (linking `Mr Vance` and `Vance` to `Jonathan Vance`'s placeholder).
+  - Cleaned `patterns.py`: completely removed test-specific surnames from `COMMON_FIRST_NAMES` and fixed role regex prefix case-sensitivity.
+  - Implemented `restoreProtectedText()` and typed placeholder generation in `frontend/lib/restore.ts`.
+  - Updated all UI components, database tables, and exports to typed placeholders.
+  - Verification: 100% target recall (92/92 detected, 0 misses, 73.6% precision).
+
+---
+
+## [2026-11-01] - Project Legal Branding & File Cleanup
 - **Decision:** Removed hardcoded proprietary names (`LexGateway`, `Notion AI Studio`) in favor of generic working title **Project Legal**.
 - **Reason:** Permanent product branding is not yet finalized; avoids customer confusion and lock-in.
 - **Key Changes:**

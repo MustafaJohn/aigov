@@ -58,7 +58,7 @@ export const IntakeScreen: React.FC<IntakeScreenProps> = ({
         </h2>
         <p className="text-sm text-slate-600 max-w-xl mx-auto">
           Upload any legal document (.docx, .xlsx, .pdf, .txt). PII is automatically scanned and masked
-          with random jargon (XXX / XYZ) so you can safely use AI.
+          with typed placeholders ([PERSON 1], [ORG 2]) so you can safely use AI.
         </p>
       </div>
 
@@ -157,7 +157,7 @@ export const IntakeScreen: React.FC<IntakeScreenProps> = ({
           <Shield className="w-4 h-4 text-emerald-600 flex-shrink-0 mt-0.5" />
           <p>
             <strong>Local & Ephemeral:</strong> Raw documents are parsed in ephemeral memory.
-            Client identifiers are replaced with random jargon before any AI prompt is sent.
+            Client identifiers are replaced with typed placeholders before any AI prompt is sent.
           </p>
         </div>
       </div>

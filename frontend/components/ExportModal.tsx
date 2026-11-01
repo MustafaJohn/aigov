@@ -67,7 +67,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
     const bundle = `# PROJECT LEGAL MATTER BUNDLE
 Document: ${documentName}
 Export Date: ${new Date().toISOString()}
-Status: Redacted with Random Jargon (XXX / XYZ)
+Status: Redacted with Typed Placeholders ([PERSON 1], [ORG 2])
 
 ---
 
@@ -122,7 +122,7 @@ ${notes.map((n) => `### ${n.title} (${n.category || 'General'})\n*${n.created_at
                   Redacted Document (.txt)
                 </div>
                 <div className="text-[11px] text-[#787774] truncate">
-                  All sensitive PII replaced with XXX / XYZ random jargon
+                  All sensitive PII replaced with typed placeholders [TYPE N]
                 </div>
               </div>
             </div>

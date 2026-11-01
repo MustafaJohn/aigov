@@ -14,7 +14,7 @@ import { EntityDatabaseTable } from '../components/EntityDatabaseTable';
 import { NotesPanel } from '../components/NotesPanel';
 import { ExportModal } from '../components/ExportModal';
 import { DocumentIR, DetectedEntity, LegalNote } from '../lib/types';
-import { compileProtectedDocument, generateNextJargon, downloadTextFile } from '../lib/restore';
+import { compileProtectedDocument, generateTypedPlaceholder, downloadTextFile } from '../lib/restore';
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
 
@@ -142,7 +142,7 @@ export default function Home() {
 
     const cleanTerm = term.trim();
     const newEntities: DetectedEntity[] = [];
-    const nextJargon = generateNextJargon(entities);
+    const nextPlaceholder = generateTypedPlaceholder('CUSTOM', entities);
 
     const blocksToSearch = targetBlockId
       ? docIR.blocks.filter((b) => b.id === targetBlockId)
@@ -168,7 +168,7 @@ export default function Home() {
             end: endIdx,
             text: matchedSubstring,
             type: 'MANUAL',
-            placeholder: nextJargon,
+            placeholder: nextPlaceholder,
             confidence: 1.0,
             is_active: true,
             is_manual: true,

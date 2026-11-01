@@ -12,39 +12,52 @@ from app.detector.patterns import (
     BANK_REGEX
 )
 
+class EntityRegistry:
+    """Manages consistent placeholders and ensures zero crashes for unknown or custom types."""
+    def __init__(self):
+        self.counters: Dict[str, int] = {}
+        self.registry: Dict[str, str] = {}
+
+    def get_placeholder(self, text: str, entity_type: str) -> str:
+        clean = text.strip()
+
+        # 1. Reuse existing placeholder if identical (case-insensitive)
+        for existing_text, placeholder in self.registry.items():
+            if existing_text.lower() == clean.lower():
+                self.registry[clean] = placeholder
+                return placeholder
+
+        # 2. Universal, dynamic type formatting (handles ANY type, standard or custom)
+        # e.g. "PERSON" -> "PERSON", "ACCOUNT_NUMBER" -> "ACCOUNT NUMBER", "ORGANISATION" -> "ORG"
+        prefix = entity_type.replace("_", " ").upper()
+        if prefix in ("ORGANISATION", "ORGANIZATION"):
+            prefix = "ORG"
+        elif prefix == "ACCOUNT NUMBER":
+            prefix = "ACCOUNT"
+        elif prefix == "MONETARY AMOUNT":
+            prefix = "AMOUNT"
+        elif prefix == "PHYSICAL ADDRESS":
+            prefix = "ADDRESS"
+        elif prefix == "UK POSTCODE":
+            prefix = "POSTCODE"
+        elif prefix == "MATTER REF":
+            prefix = "MATTER"
+        elif prefix == "DATE OF BIRTH":
+            prefix = "DATE"
+
+        self.counters[prefix] = self.counters.get(prefix, 0) + 1
+        placeholder = f"[{prefix} {self.counters[prefix]}]"
+        self.registry[clean] = placeholder
+        return placeholder
+
+
 class DetectionEngine:
     def __init__(self):
         pass
 
     def detect(self, doc_ir: DocumentIR) -> DetectionResult:
         entities: List[DetectedEntity] = []
-        value_to_jargon: Dict[str, str] = {}
-        jargon_counter = 0
-
-        # Alternate between XXX and XYZ for randomized jargon placeholders
-        def get_random_jargon(text: str, ent_type: str, preferred_prefix: str = "XXX") -> str:
-            nonlocal jargon_counter
-            clean_text = text.strip()
-            
-            # Reuse existing jargon for identical or case-insensitive matching (alias consistency)
-            if clean_text in value_to_jargon:
-                return value_to_jargon[clean_text]
-            
-            for existing_val, existing_jargon in value_to_jargon.items():
-                if existing_val.lower() == clean_text.lower():
-                    value_to_jargon[clean_text] = existing_jargon
-                    return existing_jargon
-
-            jargon_counter += 1
-            # Alternate between XXX and XYZ or respect preferred prefix
-            prefix = "XXX" if (jargon_counter % 2 != 0) else "XYZ"
-            if preferred_prefix in ["XXX", "XYZ"]:
-                prefix = preferred_prefix
-            
-            # Produces random jargon format like XXX_1, XYZ_2, XXX_3
-            jargon_token = f"{prefix}_{jargon_counter}"
-            value_to_jargon[clean_text] = jargon_token
-            return jargon_token
+        registry = EntityRegistry()
 
         for block in doc_ir.blocks:
             text = block.text
@@ -65,7 +78,7 @@ class DetectionEngine:
                         start = match.start()
                         end = match.end()
 
-                    jargon = get_random_jargon(match_text, p_name, p_info.get("jargon_prefix", "XXX"))
+                    placeholder = registry.get_placeholder(match_text, p_name)
                     entities.append(DetectedEntity(
                         id=f"ent_{uuid.uuid4().hex[:8]}",
                         block_id=block.id,
@@ -73,7 +86,7 @@ class DetectionEngine:
                         end=end,
                         text=match_text,
                         type=p_name,
-                        placeholder=jargon,
+                        placeholder=placeholder,
                         confidence=0.98,
                         is_active=True
                     ))
@@ -81,7 +94,7 @@ class DetectionEngine:
             # 2. Person Names with Titles/Honorifics
             for match in PERSON_TITLES_REGEX.finditer(text):
                 match_text = match.group()
-                jargon = get_random_jargon(match_text, "PERSON", "XXX")
+                placeholder = registry.get_placeholder(match_text, "PERSON")
                 entities.append(DetectedEntity(
                     id=f"ent_{uuid.uuid4().hex[:8]}",
                     block_id=block.id,
@@ -89,7 +102,7 @@ class DetectionEngine:
                     end=match.end(),
                     text=match_text,
                     type="PERSON",
-                    placeholder=jargon,
+                    placeholder=placeholder,
                     confidence=0.95,
                     is_active=True
                 ))
@@ -101,7 +114,7 @@ class DetectionEngine:
                     start = match.start(1)
                     end = match.end(1)
                     if match_text not in NAME_STOPWORDS:
-                        jargon = get_random_jargon(match_text, "PERSON", "XXX")
+                        placeholder = registry.get_placeholder(match_text, "PERSON")
                         entities.append(DetectedEntity(
                             id=f"ent_{uuid.uuid4().hex[:8]}",
                             block_id=block.id,
@@ -109,7 +122,7 @@ class DetectionEngine:
                             end=end,
                             text=match_text,
                             type="PERSON",
-                            placeholder=jargon,
+                            placeholder=placeholder,
                             confidence=0.92,
                             is_active=True
                         ))
@@ -120,7 +133,7 @@ class DetectionEngine:
             )
             for match in caps_heading_pattern.finditer(text):
                 caps_name = match.group(1).strip()
-                jargon = get_random_jargon(caps_name, "PERSON", "XXX")
+                placeholder = registry.get_placeholder(caps_name, "PERSON")
                 entities.append(DetectedEntity(
                     id=f"ent_{uuid.uuid4().hex[:8]}",
                     block_id=block.id,
@@ -128,7 +141,7 @@ class DetectionEngine:
                     end=match.end(1),
                     text=caps_name,
                     type="PERSON",
-                    placeholder=jargon,
+                    placeholder=placeholder,
                     confidence=0.95,
                     is_active=True
                 ))
@@ -151,7 +164,7 @@ class DetectionEngine:
                     if (first_w in COMMON_FIRST_NAMES or len(words) in [2, 3]) and cand_name not in NAME_STOPWORDS:
                         # Ensure not part of an organization (e.g. Barclays Bank or High Court)
                         if not any(sw in cand_name for sw in ["Court", "Bank", "LLP", "Ltd", "PLC", "Council", "Chambers", "Service", "Department"]):
-                            jargon = get_random_jargon(cand_name, "PERSON", "XXX")
+                            placeholder = registry.get_placeholder(cand_name, "PERSON")
                             cand_start = match.start() + start_offset
                             cand_end = cand_start + len(cand_name)
                             entities.append(DetectedEntity(
@@ -161,7 +174,7 @@ class DetectionEngine:
                                 end=cand_end,
                                 text=cand_name,
                                 type="PERSON",
-                                placeholder=jargon,
+                                placeholder=placeholder,
                                 confidence=0.91,
                                 is_active=True
                             ))
@@ -173,7 +186,7 @@ class DetectionEngine:
             for match in party_verb_pattern.finditer(text):
                 cand_surname = match.group(1) or match.group(2)
                 if cand_surname and cand_surname not in NAME_STOPWORDS and cand_surname not in LEADING_STOPWORDS:
-                    jargon = get_random_jargon(cand_surname, "PERSON", "XXX")
+                    placeholder = registry.get_placeholder(cand_surname, "PERSON")
                     word_offset = match.group().find(cand_surname)
                     cand_start = match.start() + word_offset
                     cand_end = cand_start + len(cand_surname)
@@ -184,7 +197,7 @@ class DetectionEngine:
                         end=cand_end,
                         text=cand_surname,
                         type="PERSON",
-                        placeholder=jargon,
+                        placeholder=placeholder,
                         confidence=0.90,
                         is_active=True
                     ))
@@ -192,7 +205,7 @@ class DetectionEngine:
             # 6. Companies & Legal Entities
             for match in COMPANY_REGEX.finditer(text):
                 match_text = match.group().strip()
-                jargon = get_random_jargon(match_text, "ORGANISATION", "XYZ")
+                placeholder = registry.get_placeholder(match_text, "ORGANISATION")
                 entities.append(DetectedEntity(
                     id=f"ent_{uuid.uuid4().hex[:8]}",
                     block_id=block.id,
@@ -200,7 +213,7 @@ class DetectionEngine:
                     end=match.end(),
                     text=match_text,
                     type="ORGANISATION",
-                    placeholder=jargon,
+                    placeholder=placeholder,
                     confidence=0.96,
                     is_active=True
                 ))
@@ -208,7 +221,7 @@ class DetectionEngine:
             # 7. Recognized Banks & Financial Institutions
             for match in BANK_REGEX.finditer(text):
                 match_text = match.group().strip()
-                jargon = get_random_jargon(match_text, "ORGANISATION", "XYZ")
+                placeholder = registry.get_placeholder(match_text, "ORGANISATION")
                 entities.append(DetectedEntity(
                     id=f"ent_{uuid.uuid4().hex[:8]}",
                     block_id=block.id,
@@ -216,7 +229,7 @@ class DetectionEngine:
                     end=match.end(),
                     text=match_text,
                     type="ORGANISATION",
-                    placeholder=jargon,
+                    placeholder=placeholder,
                     confidence=0.95,
                     is_active=True
                 ))
@@ -227,7 +240,7 @@ class DetectionEngine:
                 header_words = clean_header.split()
                 if all(w[0].isupper() and w.isalpha() for w in header_words):
                     if clean_header not in NAME_STOPWORDS and not any(sw in clean_header for sw in ["Court", "Legal", "Curriculum", "Resume", "Dispute", "Agreement", "Terms", "Schedule"]):
-                        jargon = get_random_jargon(clean_header, "PERSON", "XXX")
+                        placeholder = registry.get_placeholder(clean_header, "PERSON")
                         entities.append(DetectedEntity(
                             id=f"ent_{uuid.uuid4().hex[:8]}",
                             block_id=block.id,
@@ -235,7 +248,7 @@ class DetectionEngine:
                             end=len(clean_header),
                             text=clean_header,
                             type="PERSON",
-                            placeholder=jargon,
+                            placeholder=placeholder,
                             confidence=0.96,
                             is_active=True
                         ))
@@ -270,7 +283,24 @@ class DetectionEngine:
                     ))
 
         # De-duplicate overlapping entity spans within each block
-        deduped = self._deduplicate_spans(entities)
+        deduped = self._deduplicate_spans(entities, registry)
+
+        # 9. Alias Unification Pass: ensure mentions of the same person share the canonical placeholder
+        full_name_persons = [e for e in deduped if e.type == "PERSON" and len(e.text.split()) >= 2]
+        full_name_persons.sort(key=lambda x: len(x.text), reverse=True)
+        for canon in full_name_persons:
+            words = [w.strip(".,") for w in canon.text.split() if w.lower() not in {"mr", "mrs", "ms", "miss", "dr", "lord", "lady", "sir", "master"}]
+            if not words:
+                continue
+            surname = words[-1]
+            if len(surname) < 3 or surname in NAME_STOPWORDS:
+                continue
+            for ent in deduped:
+                if ent.type == "PERSON" and ent.id != canon.id:
+                    ent_words = [w.strip(".,") for w in ent.text.split()]
+                    # Match if this entity is the surname alone or Title + Surname (e.g. Vance or Mr Vance)
+                    if surname in ent_words and len(ent_words) <= 2:
+                        ent.placeholder = canon.placeholder
 
         counts: Dict[str, int] = {}
         for ent in deduped:
@@ -283,7 +313,7 @@ class DetectionEngine:
             entities_by_type=counts
         )
 
-    def _deduplicate_spans(self, entities: List[DetectedEntity]) -> List[DetectedEntity]:
+    def _deduplicate_spans(self, entities: List[DetectedEntity], registry: EntityRegistry = None) -> List[DetectedEntity]:
         blocks_map: Dict[str, List[DetectedEntity]] = {}
         for ent in entities:
             blocks_map.setdefault(ent.block_id, []).append(ent)
@@ -296,6 +326,8 @@ class DetectionEngine:
             for ent in ent_list:
                 if ent.type == "PERSON" and any(ind in ent.text for ind in ORG_INDICATORS):
                     ent.type = "ORGANISATION"
+                    if registry:
+                        ent.placeholder = registry.get_placeholder(ent.text, "ORGANISATION")
 
             # Sort by start asc, longer span first, ORGANISATION before PERSON on tie
             sorted_ents = sorted(

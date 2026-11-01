@@ -55,7 +55,7 @@ export const EntityDatabaseTable: React.FC<EntityDatabaseTableProps> = ({
   };
 
   const handleExportCSV = () => {
-    const headers = ['Entity ID', 'Original Text', 'Type', 'Jargon Token', 'Status', 'Origin'];
+    const headers = ['Entity ID', 'Original Text', 'Type', 'Placeholder Token', 'Status', 'Origin'];
     const rows = entities.map((e) => [
       e.id,
       `"${e.text.replace(/"/g, '""')}"`,
@@ -140,7 +140,7 @@ export const EntityDatabaseTable: React.FC<EntityDatabaseTableProps> = ({
                 <th className="py-2.5 px-3 w-12 text-center">Status</th>
                 <th className="py-2.5 px-3">Original Sensitive Value</th>
                 <th className="py-2.5 px-3">PII Classification</th>
-                <th className="py-2.5 px-3">Jargon Replacement</th>
+                <th className="py-2.5 px-3">Placeholder Token</th>
                 <th className="py-2.5 px-3">Confidence</th>
                 <th className="py-2.5 px-3">Source</th>
                 <th className="py-2.5 px-3 w-16 text-center">Actions</th>
@@ -232,7 +232,7 @@ export const EntityDatabaseTable: React.FC<EntityDatabaseTableProps> = ({
             <strong className="text-[#37352f]">{entities.length}</strong> total entities
           </span>
           <span className="font-mono text-[11px]">
-            {entities.filter((e) => e.is_active).length} active jargon tokens
+            {entities.filter((e) => e.is_active).length} active placeholders
           </span>
         </div>
       </div>

@@ -180,7 +180,7 @@ export const SideBySideReview: React.FC<SideBySideReviewProps> = ({
             <span className="text-slate-500">of {entities.length} items redacted</span>
             <span className="text-slate-300">|</span>
             <span className="text-indigo-600 font-mono text-[11px] font-semibold bg-indigo-50 px-2 py-0.5 rounded">
-              Jargon Format: XXX / XYZ
+              Typed Placeholders: [TYPE N]
             </span>
           </div>
 
