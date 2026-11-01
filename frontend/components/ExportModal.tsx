@@ -64,7 +64,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
     const redactedText = compileProtectedDocument(blocks, entities, false);
     const activeEntities = entities.filter((e) => e.is_active);
 
-    const bundle = `# LEXGATEWAY LEGAL MATTER BUNDLE
+    const bundle = `# PROJECT LEGAL MATTER BUNDLE
 Document: ${documentName}
 Export Date: ${new Date().toISOString()}
 Status: Redacted with Random Jargon (XXX / XYZ)

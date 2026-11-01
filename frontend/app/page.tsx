@@ -1,9 +1,9 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { NotionSidebar } from '../components/NotionSidebar';
-import { NotionTopBar } from '../components/NotionTopBar';
-import { NotionPageHeader } from '../components/NotionPageHeader';
+import { Sidebar } from '../components/Sidebar';
+import { TopBar } from '../components/TopBar';
+import { DocumentHeader } from '../components/DocumentHeader';
 import { IntakeScreen } from '../components/IntakeScreen';
 import { GateBanner } from '../components/GateBanner';
 import { SideBySideReview } from '../components/SideBySideReview';
@@ -55,7 +55,7 @@ export default function Home() {
   // Load notes from localStorage on mount
   useEffect(() => {
     try {
-      const saved = localStorage.getItem('lexgateway_notes');
+      const saved = localStorage.getItem('project_legal_notes');
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
@@ -72,7 +72,7 @@ export default function Home() {
   const saveNotes = (updated: LegalNote[]) => {
     setNotes(updated);
     try {
-      localStorage.setItem('lexgateway_notes', JSON.stringify(updated));
+      localStorage.setItem('project_legal_notes', JSON.stringify(updated));
     } catch {
       // Ignore
     }
@@ -256,7 +256,7 @@ export default function Home() {
     const compiled = compileProtectedDocument(docIR.blocks, entities, includeHidden);
     downloadTextFile(compiled, `protected-${docIR.source.filename || 'document'}.txt`);
     try {
-      localStorage.setItem('lexgateway_saved_doc', JSON.stringify({
+      localStorage.setItem('project_legal_saved_doc', JSON.stringify({
         doc_id: docIR.doc_id,
         filename: docIR.source.filename,
         entitiesCount: entities.length,
@@ -278,8 +278,8 @@ export default function Home() {
 
   return (
     <div className="flex h-screen bg-white text-[#37352f] overflow-hidden font-sans">
-      {/* 1. Left Notion-Style Collapsible Sidebar */}
-      <NotionSidebar
+      {/* 1. Left Collapsible Sidebar */}
+      <Sidebar
         activeView={activeView}
         onSelectView={(v) => setActiveView(v)}
         hasDocument={!!docIR}
@@ -304,8 +304,8 @@ export default function Home() {
 
       {/* 2. Main Workspace Canvas Area */}
       <div className="flex-1 flex flex-col h-screen overflow-hidden">
-        {/* Top Notion Breadcrumb & Actions Bar */}
-        <NotionTopBar
+        {/* Top Breadcrumb & Actions Bar */}
+        <TopBar
           isSidebarOpen={isSidebarOpen}
           onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
           documentName={docIR?.source.filename}
@@ -354,10 +354,10 @@ export default function Home() {
               />
             )}
 
-            {/* If Document Loaded: Render Notion Page Properties Header */}
+            {/* If Document Loaded: Render Document Properties Header */}
             {docIR && activeView !== 'intake' && (
               <>
-                <NotionPageHeader
+                <DocumentHeader
                   docIR={docIR}
                   entities={entities}
                   activeView={activeView}
@@ -390,7 +390,7 @@ export default function Home() {
                   />
                 )}
 
-                {/* View 3: Full-Page Notion AI Studio */}
+                {/* View 3: Full-Page AI Legal Studio */}
                 {activeView === 'ai' && (
                   <AILegalStudio
                     blocks={docIR.blocks}

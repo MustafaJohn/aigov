@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 import { DocumentIR, DetectedEntity } from '../lib/types';
 
-interface NotionPageHeaderProps {
+interface DocumentHeaderProps {
   docIR?: DocumentIR | null;
   entities: DetectedEntity[];
   activeView: 'intake' | 'review' | 'redacted_only' | 'ai' | 'notes' | 'database';
@@ -22,7 +22,7 @@ interface NotionPageHeaderProps {
   notesCount: number;
 }
 
-export const NotionPageHeader: React.FC<NotionPageHeaderProps> = ({
+export const DocumentHeader: React.FC<DocumentHeaderProps> = ({
   docIR,
   entities,
   activeView,
@@ -111,7 +111,7 @@ export const NotionPageHeader: React.FC<NotionPageHeaderProps> = ({
           }`}
         >
           <Bot className="w-3.5 h-3.5 text-purple-600" />
-          <span>Notion AI Studio</span>
+          <span>AI Legal Studio</span>
           <span className="text-[9px] bg-purple-100 text-purple-800 font-bold px-1 rounded">
             Self-Prompt
           </span>

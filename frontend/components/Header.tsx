@@ -30,7 +30,7 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
           <div>
             <div className="flex items-center space-x-2">
-              <span className="font-bold text-slate-900 tracking-tight text-lg">LexGateway</span>
+              <span className="font-bold text-slate-900 tracking-tight text-lg">Project Legal</span>
               <span className="text-[10px] bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full font-semibold border border-indigo-100">
                 Safe AI Workspace
               </span>

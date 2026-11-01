@@ -170,7 +170,7 @@ export const AICopilotDrawer: React.FC<AICopilotDrawerProps> = ({
             <Sparkles className="w-3.5 h-3.5" />
           </div>
           <div>
-            <h3 className="text-xs font-bold text-[#37352f]">Notion AI Copilot</h3>
+            <h3 className="text-xs font-bold text-[#37352f]">AI Legal Copilot</h3>
             <p className="text-[10px] text-[#787774]">Safe Reasoning on XXX/XYZ Text</p>
           </div>
         </div>
@@ -220,7 +220,7 @@ export const AICopilotDrawer: React.FC<AICopilotDrawerProps> = ({
         {messages.length === 0 ? (
           <div className="py-12 text-center text-[#787774] text-xs space-y-2">
             <Bot className="w-8 h-8 mx-auto text-[#b4b2ac]" />
-            <p className="font-medium">Notion AI is ready.</p>
+            <p className="font-medium">AI Copilot is ready.</p>
             <p className="text-[11px] text-[#787774] max-w-xs mx-auto">
               Click any self-prompt above or ask a question. The AI reasons on the safe redacted text.
             </p>

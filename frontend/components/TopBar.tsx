@@ -15,7 +15,7 @@ import {
   Lock
 } from 'lucide-react';
 
-interface NotionTopBarProps {
+interface TopBarProps {
   isSidebarOpen: boolean;
   onToggleSidebar: () => void;
   documentName?: string;
@@ -28,7 +28,7 @@ interface NotionTopBarProps {
   hasDocument: boolean;
 }
 
-export const NotionTopBar: React.FC<NotionTopBarProps> = ({
+export const TopBar: React.FC<TopBarProps> = ({
   isSidebarOpen,
   onToggleSidebar,
   documentName,
@@ -49,7 +49,7 @@ export const NotionTopBar: React.FC<NotionTopBarProps> = ({
       case 'database':
         return 'Entity Database';
       case 'ai':
-        return 'Notion AI Copilot';
+        return 'AI Copilot';
       case 'notes':
         return 'Case Notes';
       default:
@@ -75,7 +75,7 @@ export const NotionTopBar: React.FC<NotionTopBarProps> = ({
 
         {/* Breadcrumb Trail */}
         <div className="flex items-center space-x-1.5 text-[#787774] text-xs truncate">
-          <span className="hover:text-[#37352f] cursor-pointer">LexGateway</span>
+          <span className="hover:text-[#37352f] cursor-pointer">Project Legal</span>
           <ChevronRight className="w-3 h-3 text-[#b4b2ac]" />
 
           {documentName && (
@@ -117,7 +117,7 @@ export const NotionTopBar: React.FC<NotionTopBarProps> = ({
                   ? 'bg-purple-100 text-purple-900 font-semibold'
                   : 'text-[#37352f] hover:bg-[#efefed]'
               }`}
-              title="Toggle Notion AI Copilot Drawer"
+              title="Toggle AI Copilot Drawer"
             >
               <Sparkles className="w-3.5 h-3.5 text-purple-600" />
               <span className="hidden sm:inline">Ask AI</span>

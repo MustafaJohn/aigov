@@ -1,16 +1,16 @@
-# 📘 LexGateway: Developer Architecture & Notion Workspace Guide
+# 📘 Project Legal: Developer Architecture & Notion Workspace Guide
 
-Welcome to the **LexGateway** developer guide! This document explains in simple, plain English what every single file in the project does, how the pieces fit together, and how the **Notion-style legal workspace** interface is structured.
+Welcome to the **Project Legal** developer guide! This document explains in simple, plain English what every single file in the project does, how the pieces fit together, and how the **Notion-style legal workspace** interface is structured.
 
 ---
 
 ## 🏛️ High-Level System Architecture
 
-LexGateway is an **AI-Safe Legal Workspace** designed for law firms and lawyers. Rather than a static, linear website or wizard, it provides a full **Notion-like interactive legal workspace**:
+Project Legal is an **AI-Safe Legal Workspace** designed for law firms and lawyers. Rather than a static, linear website or wizard, it provides a full **Notion-like interactive legal workspace**:
 
 ```
 ┌─────────────────┬─────────────────────────────────────────────────────────────┬──────────────────┐
-│ ⚖️ Notion        │ Top Breadcrumbs: LexGateway / [Doc] / Redaction Studio      │ ✨ Notion AI     │
+│ ⚖️ Notion        │ Top Breadcrumbs: Project Legal / [Doc] / Redaction Studio      │ ✨ Notion AI     │
 │ Sidebar         ├─────────────────────────────────────────────────────────────┤ Copilot Drawer   │
 │ (260px wide,    │ Notion Page Header: 📄 Title, Properties (Blocks, PII)      │ (Slide-over on   │
 │ Collapsible)    │ View Tabs: [ Split Review | Redacted | AI | Database | Notes│ Right Side)      │
@@ -54,12 +54,12 @@ LegalTech/
 │   │   ├── page.tsx                # Master workspace coordinator & view manager
 │   │   └── globals.css             # Notion color palette & scrollbars
 │   ├── components/
-│   │   ├── NotionSidebar.tsx       # Collapsible left navigation bar
-│   │   ├── NotionTopBar.tsx        # Top breadcrumb trail & action triggers
-│   │   ├── NotionPageHeader.tsx    # Notion document title, properties & view tabs
+│   │   ├── Sidebar.tsx       # Collapsible left navigation bar
+│   │   ├── TopBar.tsx        # Top breadcrumb trail & action triggers
+│   │   ├── DocumentHeader.tsx    # Notion document title, properties & view tabs
 │   │   ├── SideBySideReview.tsx    # Redaction Studio (Original vs Redacted Preview)
 │   │   ├── RedactedOnlyView.tsx    # Clean full-page redacted document view
-│   │   ├── AILegalStudio.tsx       # Full-page Notion AI Studio (Self-prompts & chat)
+│   │   ├── AILegalStudio.tsx       # Full-page AI Legal Studio (Self-prompts & chat)
 │   │   ├── AICopilotDrawer.tsx     # Notion AI slide-over drawer (usable on any page)
 │   │   ├── EntityDatabaseTable.tsx # Notion-style database table of all PII tokens
 │   │   ├── NotesPanel.tsx          # Notion-style case pages & legal notes
@@ -80,23 +80,23 @@ LegalTech/
 
 ## 🎨 The Notion-Style UI Components
 
-### 1. `frontend/components/NotionSidebar.tsx`
+### 1. `frontend/components/Sidebar.tsx`
 - **Collapsible Sidebar:** Toggled with `PanelLeft` / `PanelLeftClose` (like Notion's `Ctrl+\`).
-- **Workspace Switcher:** Branded *"⚖️ LexGateway Legal"* with workspace metadata.
+- **Workspace Switcher:** Branded *"⚖️ Project Legal"* with workspace metadata.
 - **Quick Action Buttons:** 1-Click *"Intake New Document"* and *"New Note Page"*.
 - **Workspace Views:** Links to **Intake**, **Redaction Studio**, **Entity Database (Table)**, **Notion AI Copilot**, and **Case Notes**.
 - **Active Document Section:** Displays currently open file with status indicator (`● Ready`).
 - **Notes Pages Sub-tree:** Lists all created notes with categorized Notion emojis (`📝`, `⚠️`, `⚖️`, `💡`).
 - **Footer:** Model status badge (`Model: Demo / BYOK`).
 
-### 2. `frontend/components/NotionTopBar.tsx`
-- **Breadcrumbs:** Shows navigational path: `LexGateway / Documents / [Filename] / [Active View]`.
+### 2. `frontend/components/TopBar.tsx`
+- **Breadcrumbs:** Shows navigational path: `Project Legal / Documents / [Filename] / [Active View]`.
 - **Top Right Actions:**
   - `✨ Ask AI`: Toggles the Notion AI Copilot side-drawer from any screen!
   - `⬇️ Export`: Opens the Export & Download Hub.
   - `🔄 Reset`: Starts a fresh intake.
 
-### 3. `frontend/components/NotionPageHeader.tsx`
+### 3. `frontend/components/DocumentHeader.tsx`
 - Displays the document like a Notion page:
   - Large title with emoji icon: `📄 Commercial_Dispute_Memo.txt`.
   - Notion-style database properties block:
@@ -107,7 +107,7 @@ LegalTech/
   - Notion view tab switcher:
     - `[ 📄 Side-by-Side Review ]`
     - `[ 🛡️ Redacted Text Only ]`
-    - `[ 🤖 Notion AI Studio ]`
+    - `[ 🤖 AI Legal Studio ]`
     - `[ 🗃️ Entity Database ]`
     - `[ 📝 Case Notes ]`
 

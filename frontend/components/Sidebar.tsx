@@ -24,7 +24,7 @@ import {
 } from 'lucide-react';
 import { LegalNote } from '../lib/types';
 
-interface NotionSidebarProps {
+interface SidebarProps {
   activeView: 'intake' | 'review' | 'redacted_only' | 'ai' | 'notes' | 'database';
   onSelectView: (view: 'intake' | 'review' | 'redacted_only' | 'ai' | 'notes' | 'database') => void;
   hasDocument: boolean;
@@ -41,7 +41,7 @@ interface NotionSidebarProps {
   provider: string;
 }
 
-export const NotionSidebar: React.FC<NotionSidebarProps> = ({
+export const Sidebar: React.FC<SidebarProps> = ({
   activeView,
   onSelectView,
   hasDocument,
@@ -81,7 +81,7 @@ export const NotionSidebar: React.FC<NotionSidebarProps> = ({
           </div>
           <div className="truncate">
             <h1 className="text-xs font-semibold text-[#37352f] leading-tight truncate">
-              LexGateway Legal
+              Project Legal
             </h1>
             <p className="text-[10px] text-[#787774] truncate">Private Legal Workspace</p>
           </div>
@@ -184,7 +184,7 @@ export const NotionSidebar: React.FC<NotionSidebarProps> = ({
                 >
                   <div className="flex items-center space-x-2">
                     <Bot className="w-3.5 h-3.5 text-purple-600" />
-                    <span>Notion AI Copilot</span>
+                    <span>AI Copilot</span>
                   </div>
                   <span className="text-[9px] bg-purple-100 text-purple-800 px-1.5 py-0.2 rounded font-semibold">
                     1-Click
