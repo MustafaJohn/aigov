@@ -209,6 +209,7 @@ export default function Home() {
         model: selectedModel,
         protected_text: compiledProtectedText,
         instructions: prompt,
+        active_entities: entities.filter((e) => e.is_active),
       }),
     });
 

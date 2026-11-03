@@ -27,7 +27,8 @@ if str(BACKEND_DIR) not in sys.path:
 try:
     from app.parser.intake import intake_file
     from app.detector.engine import DetectionEngine
-    from app.models import DocumentIR, DetectedEntity
+    from app.guard.checker import GuardEngine
+    from app.models import DocumentIR, DetectedEntity, OutboundCheckRequest
 except ImportError as e:
     print(f"Error importing backend modules: {e}")
     print(f"PYTHONPATH: {sys.path}")
@@ -299,6 +300,62 @@ def print_report(stats: Dict[str, TypeStats], misses: List[MissRecord], ingestio
     print("\n" + "=" * 78 + "\n")
 
 
+def run_fail_safe_harness_test() -> Tuple[bool, str]:
+    """
+    Phase 1 Exit Criterion:
+    'Outbound check catches a deliberately unmasked alias: Always.
+     Harness case: mask the full name, leave the surname, expect a block.'
+    """
+    sample_entity = DetectedEntity(
+        id="ent_test_sample",
+        block_id="b1",
+        start=0,
+        end=14,
+        text="Jonathan Vance",
+        type="PERSON",
+        placeholder="[PERSON 1]",
+        confidence=1.0,
+        is_active=True
+    )
+
+    # Case 1: Mask the full name, leave the surname in document
+    leaked_doc = "The contract was signed by [PERSON 1]. Later, Vance attended the tribunal."
+    req1 = OutboundCheckRequest(
+        doc_id="test_doc",
+        protected_text=leaked_doc,
+        active_entities=[sample_entity],
+        user_prompt="Summarise the matter."
+    )
+    res1 = GuardEngine.check_outbound(req1)
+    if res1.passed:
+        return False, "Failed to block when surname alias 'Vance' remained unmasked in document text."
+
+    # Case 2: Mask full name in doc, but lawyer types honorific + surname in prompt
+    clean_doc = "The contract was signed by [PERSON 1]. Later, [PERSON 1] attended the tribunal."
+    req2 = OutboundCheckRequest(
+        doc_id="test_doc",
+        protected_text=clean_doc,
+        active_entities=[sample_entity],
+        user_prompt="Summarise Mr Vance's arguments."
+    )
+    res2 = GuardEngine.check_outbound(req2)
+    if res2.passed:
+        return False, "Failed to block when alias 'Mr Vance' was typed in lawyer prompt."
+
+    # Case 3: Fully protected document and prompt
+    req3 = OutboundCheckRequest(
+        doc_id="test_doc",
+        protected_text=clean_doc,
+        active_entities=[sample_entity],
+        user_prompt="Summarise [PERSON 1]'s arguments."
+    )
+    res3 = GuardEngine.check_outbound(req3)
+    if not res3.passed:
+        return False, f"False block on fully protected text: {res3.explanation}"
+
+    return True, "Deliberately unmasked alias blocked in document & prompt; clean dispatch passed."
+
+
 def main():
     synthetic_dir = WORKSPACE_ROOT / "tests" / "synthetic"
     if not synthetic_dir.exists():
@@ -307,6 +364,30 @@ def main():
 
     stats, misses, warnings = run_evaluation(synthetic_dir)
     print_report(stats, misses, warnings)
+
+    # Run Phase 1 Fail-Safe Gate Evaluation
+    print("--- Phase 1 Exit Criteria Checks ---")
+    fs_ok, fs_msg = run_fail_safe_harness_test()
+    if fs_ok:
+        print(f"[OK] Outbound Fail-Safe Gate: {fs_msg}")
+    else:
+        print(f"[X] Outbound Fail-Safe Gate FAILED: {fs_msg}")
+
+    # Check whether all required recall targets are satisfied
+    all_targets_met = True
+    for ent_type, st in stats.items():
+        if ent_type == "PERSON" and st.recall < TARGETS["PERSON"]:
+            all_targets_met = False
+        elif ent_type == "ORGANISATION" and st.recall < TARGETS["ORGANISATION"]:
+            all_targets_met = False
+        elif ent_type in STRUCTURED_TYPES and st.recall < TARGETS["STRUCTURED"]:
+            all_targets_met = False
+
+    if not all_targets_met or not fs_ok:
+        print("\n[!] Build FAILED: One or more Phase 1 targets were not met.")
+        sys.exit(1)
+    else:
+        print("[+] Build PASSED: All Phase 1 recall and fail-safe exit criteria satisfied.")
 
 
 if __name__ == "__main__":

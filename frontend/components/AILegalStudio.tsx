@@ -22,7 +22,7 @@ import {
   RotateCcw
 } from 'lucide-react';
 import { Block, DetectedEntity, SelfPromptAction, AIChatMessage } from '../lib/types';
-import { compileProtectedDocument, downloadTextFile } from '../lib/restore';
+import { compileProtectedDocument, downloadTextFile, restoreProtectedText } from '../lib/restore';
 
 interface AILegalStudioProps {
   blocks: Block[];
@@ -33,7 +33,10 @@ interface AILegalStudioProps {
   isLoading: boolean;
 }
 
-const SELF_PROMPTS: SelfPromptAction[] = [
+// Phase 1 Task Rule: Only 'summarise' is active; other tasks flagged off until Phase 2
+const ENABLE_PHASE2_EXTENDED_TASKS = false;
+
+const ALL_SELF_PROMPTS: SelfPromptAction[] = [
   {
     id: 'summary',
     title: 'Executive Legal Summary',
@@ -78,6 +81,10 @@ const SELF_PROMPTS: SelfPromptAction[] = [
   }
 ];
 
+const SELF_PROMPTS: SelfPromptAction[] = ENABLE_PHASE2_EXTENDED_TASKS
+  ? ALL_SELF_PROMPTS
+  : ALL_SELF_PROMPTS.filter((p) => p.id === 'summary');
+
 export const AILegalStudio: React.FC<AILegalStudioProps> = ({
   blocks,
   entities,
@@ -93,6 +100,7 @@ export const AILegalStudio: React.FC<AILegalStudioProps> = ({
   const [chatHistory, setChatHistory] = useState<AIChatMessage[]>([]);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [showConfig, setShowConfig] = useState<boolean>(false);
+  const [outputViewMode, setOutputViewMode] = useState<Record<string, 'restored' | 'raw' | 'side_by_side'>>({});
 
   const activeEntities = entities.filter((e) => e.is_active);
   const compiledText = compileProtectedDocument(blocks, entities, includeHidden);
@@ -402,9 +410,105 @@ export const AILegalStudio: React.FC<AILegalStudioProps> = ({
                 </div>
               </div>
 
-              <div className="prose prose-sm max-w-none text-slate-800 text-xs sm:text-sm font-sans whitespace-pre-wrap leading-relaxed">
-                {msg.text}
-              </div>
+              {msg.sender === 'user' ? (
+                <div className="prose prose-sm max-w-none text-slate-800 text-xs sm:text-sm font-sans whitespace-pre-wrap leading-relaxed">
+                  {msg.text}
+                </div>
+              ) : (
+                (() => {
+                  const restoreRes = restoreProtectedText(msg.text, entities);
+                  const mode = outputViewMode[msg.id] || 'restored';
+
+                  return (
+                    <div className="space-y-3">
+                      {/* View Switcher & Restoration Status Banner (Deliverable 9) */}
+                      <div className="flex flex-wrap items-center justify-between gap-2 p-2.5 rounded-lg bg-slate-50 border border-slate-200 text-xs">
+                        <div className="flex items-center space-x-1">
+                          <span className="text-[11px] font-semibold text-slate-500 mr-1">View:</span>
+                          <button
+                            type="button"
+                            onClick={() => setOutputViewMode(prev => ({ ...prev, [msg.id]: 'restored' }))}
+                            className={`px-2 py-0.5 rounded text-[11px] font-medium transition-colors cursor-pointer ${
+                              mode === 'restored'
+                                ? 'bg-indigo-600 text-white shadow-2xs'
+                                : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'
+                            }`}
+                          >
+                            Restored View
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setOutputViewMode(prev => ({ ...prev, [msg.id]: 'raw' }))}
+                            className={`px-2 py-0.5 rounded text-[11px] font-medium transition-colors cursor-pointer ${
+                              mode === 'raw'
+                                ? 'bg-indigo-600 text-white shadow-2xs'
+                                : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'
+                            }`}
+                          >
+                            Protected AI Output
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setOutputViewMode(prev => ({ ...prev, [msg.id]: 'side_by_side' }))}
+                            className={`px-2 py-0.5 rounded text-[11px] font-medium transition-colors cursor-pointer ${
+                              mode === 'side_by_side'
+                                ? 'bg-indigo-600 text-white shadow-2xs'
+                                : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'
+                            }`}
+                          >
+                            Side-by-Side
+                          </button>
+                        </div>
+
+                        <div className="flex items-center space-x-2 text-[11px]">
+                          <span className="font-medium text-emerald-800 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded">
+                            ✓ Restored {restoreRes.restoredCount} of {restoreRes.totalPlaceholders} placeholders
+                          </span>
+                          {restoreRes.unrestoredTokens.length > 0 && (
+                            <span className="font-medium text-amber-800 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded">
+                              ⚠️ {restoreRes.unrestoredTokens.length} unrestored: {restoreRes.unrestoredTokens.join(', ')}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Display Mode Content */}
+                      {mode === 'restored' && (
+                        <div className="prose prose-sm max-w-none text-slate-800 text-xs sm:text-sm font-sans whitespace-pre-wrap leading-relaxed p-1">
+                          {restoreRes.restoredText}
+                        </div>
+                      )}
+
+                      {mode === 'raw' && (
+                        <div className="prose prose-sm max-w-none text-slate-800 text-xs sm:text-sm font-mono whitespace-pre-wrap leading-relaxed bg-slate-50/70 p-3 rounded-lg border border-slate-200">
+                          {msg.text}
+                        </div>
+                      )}
+
+                      {mode === 'side_by_side' && (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+                          <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-3 space-y-2">
+                            <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider border-b border-slate-200 pb-1">
+                              Protected AI Output (Tokens Sent/Received)
+                            </div>
+                            <div className="font-mono text-xs text-slate-800 whitespace-pre-wrap leading-relaxed">
+                              {msg.text}
+                            </div>
+                          </div>
+                          <div className="rounded-lg border border-indigo-200 bg-indigo-50/20 p-3 space-y-2">
+                            <div className="text-[10px] font-bold text-indigo-700 uppercase tracking-wider border-b border-indigo-100 pb-1">
+                              Restored View (Client Identities Reconstituted)
+                            </div>
+                            <div className="font-sans text-xs sm:text-sm text-slate-800 whitespace-pre-wrap leading-relaxed">
+                              {restoreRes.restoredText}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()
+              )}
             </div>
           ))}
         </div>
@@ -434,6 +538,10 @@ export const AILegalStudio: React.FC<AILegalStudioProps> = ({
             placeholder="e.g. What are the tax or SRA compliance implications of the proposed £450k settlement?"
             className="flex-1 text-xs px-3.5 py-2.5 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 bg-slate-50/50"
           />
+          <div className="hidden sm:flex items-center space-x-1.5 px-3 py-2 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-[11px] font-medium flex-shrink-0" title="Outbound gate checks prompt and document for unmasked sensitive items">
+            <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+            <span>Outbound Gate Active</span>
+          </div>
           <button
             type="submit"
             disabled={!customPrompt.trim() || isLoading}

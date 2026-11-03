@@ -4,6 +4,20 @@ A high-level record of architectural decisions, customer feedback fixes, and del
 
 ---
 
+## [2026-11-04] - Deliverables 5, 6, 8 & 9: Server-Side Fail-Safe, Output Review & Review Gating
+- **Decision:** Integrated server-side fail-safe outbound check, inbound output scanning, task lock to Summarise, output review side-by-side mode, and review screen deduplication with uncertain items gating.
+- **Reason:** Satisfies Phase 1 exit criteria: outbound check must catch deliberately unmasked aliases; prompt must be screened; single task focus; side-by-side raw/restored review with restore count; and review screen must deduplicate repeated entities and gate on unresolved items.
+- **Key Changes:**
+  - `backend/app/guard/checker.py`: Algorithmic alias and surface form generation (surnames, honorific + surname, initial + surname, corporate suffixes, compact formats) with word-boundary regex matching (`\b...\b`). Zero hardcoding.
+  - `backend/app/main.py`: Server-side outbound guard and prompt screening directly inside `/api/llm/summarize`. Any unmasked alias in text or prompt aborts dispatch before LLM inference. Inbound scan verification on response. Models schema kept frozen.
+  - `frontend/components/AILegalStudio.tsx` & `AICopilotDrawer.tsx`: Feature-flagged off 5 extra workflows (`ENABLE_PHASE2_EXTENDED_TASKS = false`), locking Phase 1 to Executive Legal Summary. Added outbound gate status badge beside custom prompt input.
+  - `frontend/components/AILegalStudio.tsx`: Implemented Deliverable 9 Output Review with toggleable/split views (Restored View, Protected AI Output, Side-by-Side), live placeholder restoration counter, and unrestored token alert badges.
+  - `frontend/components/SideBySideReview.tsx`: Deduplicated entity list by unique value with mention counter (e.g. `Apex Global Solutions (3×)`). Added Uncertain Items Gate with mandatory Confirm/Dismiss resolution. Gated the "Open in AI Assistant" button until all uncertain items are resolved. Updated preview header to `PROTECTED PREVIEW (TYPED PLACEHOLDERS)`.
+  - `tests/eval.py`: Added automated harness test for deliberately unmasked aliases (`run_fail_safe_harness_test`), verifying that leaving an unmasked alias in document text or prompt triggers a block. Added build failure exit code.
+  - Verification: `tests/eval.py` passed with 100% recall (92/92, 0 misses) and `[OK] Outbound Fail-Safe Gate`. TypeScript check passed with 0 errors.
+
+---
+
 ## [2026-11-02] - Deliverables 2 & 4: Typed Placeholders & Pattern De-hardcoding
 - **Decision:** Replaced random jargon tokens (`XXX_1`, `XYZ_2`) with semantic typed placeholders (`[PERSON 1]`, `[ORG 2]`, `[ACCOUNT 1]`).
 - **Reason:** In legal analysis, the AI must understand semantic roles (employer vs employee, bank vs claim amount) while keeping client data 100% masked.

@@ -24,7 +24,9 @@ interface AICopilotDrawerProps {
   isLoading: boolean;
 }
 
-const QUICK_SELF_PROMPTS: SelfPromptAction[] = [
+const ENABLE_PHASE2_EXTENDED_TASKS = false;
+
+const ALL_QUICK_SELF_PROMPTS: SelfPromptAction[] = [
   {
     id: 'summary',
     title: 'Executive Summary',
@@ -68,6 +70,10 @@ const QUICK_SELF_PROMPTS: SelfPromptAction[] = [
     prompt: 'Construct a precise chronological timeline of all relevant dates, communications, filings, and milestones mentioned in this document.'
   }
 ];
+
+const QUICK_SELF_PROMPTS: SelfPromptAction[] = ENABLE_PHASE2_EXTENDED_TASKS
+  ? ALL_QUICK_SELF_PROMPTS
+  : ALL_QUICK_SELF_PROMPTS.filter((p) => p.id === 'summary');
 
 export const AICopilotDrawer: React.FC<AICopilotDrawerProps> = ({
   isOpen,

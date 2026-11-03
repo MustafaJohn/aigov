@@ -107,9 +107,84 @@ export const SideBySideReview: React.FC<SideBySideReviewProps> = ({
     downloadTextFile(text, 'redacted-document.txt');
   };
 
-  const filteredEntities = entities.filter((ent) => {
-    if (selectedTypeFilter !== 'ALL' && ent.type !== selectedTypeFilter) return false;
-    if (searchQuery.trim() && !ent.text.toLowerCase().includes(searchQuery.toLowerCase())) return false;
+  // Deliverable 5: Deduplicate entities by unique canonical value and track uncertain items
+  const [resolvedUncertainKeys, setResolvedUncertainKeys] = useState<Set<string>>(new Set());
+
+  const entityGroups = React.useMemo(() => {
+    const map = new Map<string, {
+      key: string;
+      text: string;
+      type: string;
+      placeholder: string;
+      ids: string[];
+      count: number;
+      isActive: boolean;
+      isManual: boolean;
+      confidence: number;
+      isUncertain: boolean;
+    }>();
+
+    for (const ent of entities) {
+      const key = `${ent.text.trim().toLowerCase()}__${ent.type}`;
+      if (!map.has(key)) {
+        map.set(key, {
+          key,
+          text: ent.text.trim(),
+          type: ent.type,
+          placeholder: ent.placeholder || '[PROTECTED]',
+          ids: [ent.id],
+          count: 1,
+          isActive: ent.is_active,
+          isManual: Boolean((ent as any).is_manual),
+          confidence: ent.confidence ?? 1.0,
+          isUncertain: !((ent as any).is_manual) && (ent.confidence !== undefined && ent.confidence < 0.94)
+        });
+      } else {
+        const existing = map.get(key)!;
+        existing.ids.push(ent.id);
+        existing.count += 1;
+        if (ent.is_active) existing.isActive = true;
+      }
+    }
+    return Array.from(map.values());
+  }, [entities]);
+
+  const uncertainGroups = entityGroups.filter((g) => g.isUncertain && !resolvedUncertainKeys.has(g.key));
+  const unresolvedUncertainCount = uncertainGroups.length;
+
+  const handleToggleGroup = (grp: typeof entityGroups[0]) => {
+    const shouldActivate = !grp.isActive;
+    grp.ids.forEach((id) => {
+      const current = entities.find((e) => e.id === id);
+      if (current && current.is_active !== shouldActivate) {
+        onToggleEntity(id);
+      }
+    });
+  };
+
+  const handleConfirmUncertain = (grpKey: string, ids: string[]) => {
+    ids.forEach((id) => {
+      const current = entities.find((e) => e.id === id);
+      if (current && !current.is_active) {
+        onToggleEntity(id);
+      }
+    });
+    setResolvedUncertainKeys((prev) => new Set([...prev, grpKey]));
+  };
+
+  const handleDismissUncertain = (grpKey: string, ids: string[]) => {
+    ids.forEach((id) => {
+      const current = entities.find((e) => e.id === id);
+      if (current && current.is_active) {
+        onToggleEntity(id);
+      }
+    });
+    setResolvedUncertainKeys((prev) => new Set([...prev, grpKey]));
+  };
+
+  const filteredGroups = entityGroups.filter((grp) => {
+    if (selectedTypeFilter !== 'ALL' && grp.type !== selectedTypeFilter) return false;
+    if (searchQuery.trim() && !grp.text.toLowerCase().includes(searchQuery.toLowerCase())) return false;
     return true;
   });
 
@@ -227,9 +302,21 @@ export const SideBySideReview: React.FC<SideBySideReviewProps> = ({
           <button
             type="button"
             onClick={onProceedToAI}
-            className="flex items-center space-x-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold px-4 py-2 rounded-lg shadow-sm transition-colors cursor-pointer"
+            disabled={unresolvedUncertainCount > 0}
+            className={`flex items-center space-x-1.5 text-xs font-semibold px-4 py-2 rounded-lg shadow-sm transition-colors cursor-pointer ${
+              unresolvedUncertainCount > 0
+                ? 'bg-slate-200 text-slate-400 cursor-not-allowed border border-slate-300'
+                : 'bg-indigo-600 hover:bg-indigo-700 text-white'
+            }`}
+            title={unresolvedUncertainCount > 0 ? `Please confirm or dismiss ${unresolvedUncertainCount} uncertain item(s) before proceeding` : 'Proceed to AI Assistant'}
           >
-            <span>Open in AI Assistant</span>
+            {unresolvedUncertainCount > 0 ? (
+              <span className="flex items-center space-x-1">
+                <span>Gate: Resolve {unresolvedUncertainCount} Uncertain Items</span>
+              </span>
+            ) : (
+              <span>Open in AI Assistant</span>
+            )}
             <ArrowRight className="w-3.5 h-3.5" />
           </button>
         </div>
@@ -448,34 +535,84 @@ export const SideBySideReview: React.FC<SideBySideReviewProps> = ({
             </div>
           </div>
 
-          {/* Entity Cards List */}
+          {/* Deliverable 5: Uncertain Items Resolution Gate */}
+          {unresolvedUncertainCount > 0 && (
+            <div className="m-2 p-3 rounded-lg bg-amber-50 border border-amber-200 space-y-2">
+              <div className="flex items-center justify-between text-xs font-bold text-amber-900">
+                <span className="flex items-center space-x-1.5">
+                  <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
+                  <span>Uncertain Items Gate ({unresolvedUncertainCount} pending)</span>
+                </span>
+              </div>
+              <p className="text-[11px] text-amber-800 leading-normal">
+                Confirm or dismiss each uncertain detection below before proceeding to AI dispatch.
+              </p>
+              <div className="space-y-1.5 pt-1">
+                {uncertainGroups.map((grp) => (
+                  <div key={`unc_${grp.key}`} className="flex items-center justify-between gap-2 p-2 rounded bg-white border border-amber-200 text-xs">
+                    <div className="overflow-hidden">
+                      <div className="font-semibold text-slate-900 truncate">{grp.text}</div>
+                      <div className="text-[10px] text-slate-500">{grp.type} (Tier: Uncertain)</div>
+                    </div>
+                    <div className="flex items-center space-x-1 flex-shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => handleConfirmUncertain(grp.key, grp.ids)}
+                        className="px-2 py-1 rounded text-[10px] font-semibold bg-emerald-600 text-white hover:bg-emerald-700 cursor-pointer shadow-2xs"
+                        title="Confirm redaction for all instances"
+                      >
+                        Confirm
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDismissUncertain(grp.key, grp.ids)}
+                        className="px-2 py-1 rounded text-[10px] font-semibold bg-slate-100 text-slate-600 hover:bg-slate-200 border border-slate-300 cursor-pointer"
+                        title="Dismiss and keep clear"
+                      >
+                        Dismiss
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Deduplicated Entity Cards List (Deliverable 5) */}
           <div className="p-2 overflow-y-auto space-y-1.5 flex-1 text-xs">
-            {filteredEntities.length === 0 ? (
+            {filteredGroups.length === 0 ? (
               <div className="text-center py-8 text-slate-400 text-xs">
                 No matching redacted items found.
               </div>
             ) : (
-              filteredEntities.map((ent) => (
+              filteredGroups.map((grp) => (
                 <div
-                  key={ent.id}
+                  key={grp.key}
                   className={`p-2.5 rounded-lg border transition-all flex items-center justify-between gap-2 ${
-                    ent.is_active
-                      ? ent.is_manual
+                    grp.isActive
+                      ? grp.isManual
                         ? 'bg-purple-50/80 border-purple-200 text-slate-900'
                         : 'bg-amber-50/70 border-amber-200 text-slate-900'
                       : 'bg-slate-50 border-slate-200 text-slate-400 opacity-60'
                   }`}
                 >
                   <div
-                    onClick={() => onToggleEntity(ent.id)}
+                    onClick={() => handleToggleGroup(grp)}
                     className="space-y-0.5 overflow-hidden flex-1 cursor-pointer"
                   >
-                    <div className="font-medium truncate text-xs">{ent.text}</div>
+                    <div className="flex items-center space-x-1.5">
+                      <span className="font-medium truncate text-xs">{grp.text}</span>
+                      {grp.count > 1 && (
+                        <span className="text-[9px] font-semibold px-1.5 py-0.2 rounded-full bg-slate-200 text-slate-700">
+                          {grp.count}×
+                        </span>
+                      )}
+                    </div>
                     <div className="flex items-center space-x-1.5 text-[10px] font-mono">
-                      <span className="text-slate-500 font-semibold">{ent.type}</span>
+                      <span className="text-slate-500 font-semibold">{grp.type}</span>
                       <span className="text-slate-300">→</span>
                       <span className="text-indigo-600 font-bold bg-indigo-50/60 px-1 rounded">
-                        {ent.placeholder}
+                        {grp.placeholder}
                       </span>
                     </div>
                   </div>
@@ -483,22 +620,22 @@ export const SideBySideReview: React.FC<SideBySideReviewProps> = ({
                   <div className="flex items-center space-x-1 flex-shrink-0">
                     <button
                       type="button"
-                      onClick={() => onToggleEntity(ent.id)}
+                      onClick={() => handleToggleGroup(grp)}
                       className={`w-5 h-5 rounded-md flex items-center justify-center text-[10px] transition-colors cursor-pointer ${
-                        ent.is_active
+                        grp.isActive
                           ? 'bg-emerald-500 text-white'
                           : 'bg-slate-200 text-slate-500 hover:bg-slate-300'
                       }`}
-                      title={ent.is_active ? 'Click to unhighlight' : 'Click to highlight'}
+                      title={grp.isActive ? 'Click to unhighlight all mentions' : 'Click to highlight all mentions'}
                     >
-                      {ent.is_active ? <Check className="w-3 h-3" /> : '×'}
+                      {grp.isActive ? <Check className="w-3 h-3" /> : '×'}
                     </button>
 
                     <button
                       type="button"
-                      onClick={() => onRemoveEntity(ent.id)}
+                      onClick={() => grp.ids.forEach((id) => onRemoveEntity(id))}
                       className="w-5 h-5 rounded-md text-slate-400 hover:text-rose-600 hover:bg-rose-50 flex items-center justify-center transition-colors cursor-pointer"
-                      title="Permanently remove this highlight"
+                      title="Permanently remove all instances of this highlight"
                     >
                       <Trash2 className="w-3 h-3" />
                     </button>
@@ -519,7 +656,7 @@ export const SideBySideReview: React.FC<SideBySideReviewProps> = ({
               </h4>
             </div>
             <span className="text-[10px] font-mono font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded">
-              AI SAFE (XXX / XYZ)
+              PROTECTED PREVIEW (TYPED PLACEHOLDERS)
             </span>
           </div>
 
