@@ -24,7 +24,8 @@ interface AICopilotDrawerProps {
   isLoading: boolean;
 }
 
-const ENABLE_PHASE2_EXTENDED_TASKS = false;
+// Phase 1: summarise only. Set NEXT_PUBLIC_ENABLE_PHASE2_TASKS=true at build time to show the other tasks.
+const ENABLE_PHASE2_EXTENDED_TASKS = process.env.NEXT_PUBLIC_ENABLE_PHASE2_TASKS === 'true';
 
 const ALL_QUICK_SELF_PROMPTS: SelfPromptAction[] = [
   {

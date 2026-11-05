@@ -26,6 +26,8 @@ import { LegalNote } from '../lib/types';
 
 interface SidebarProps {
   activeView: 'intake' | 'review' | 'redacted_only' | 'ai' | 'notes' | 'database';
+  /** When true the AI view cannot be opened (fail-safe gate not yet passed). */
+  aiLocked?: boolean;
   onSelectView: (view: 'intake' | 'review' | 'redacted_only' | 'ai' | 'notes' | 'database') => void;
   hasDocument: boolean;
   documentName?: string;
@@ -44,6 +46,7 @@ interface SidebarProps {
 export const Sidebar: React.FC<SidebarProps> = ({
   activeView,
   onSelectView,
+  aiLocked = false,
   hasDocument,
   documentName,
   notes,
@@ -176,7 +179,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
                 <button
                   onClick={() => onSelectView('ai')}
-                  className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-md transition-colors cursor-pointer ${
+                  disabled={aiLocked}
+                  title={aiLocked ? 'Complete the review and resolve intake notices before using AI' : undefined}
+                  className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-md transition-colors ${aiLocked ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'} ${
                     activeView === 'ai'
                       ? 'bg-[#efefed] font-semibold text-[#37352f]'
                       : 'text-[#5f5e5b] hover:bg-[#efefed] hover:text-[#37352f]'

@@ -6,9 +6,12 @@ import { ParseReport } from '../lib/types';
 
 interface GateBannerProps {
   report: ParseReport;
+  /** True once the lawyer has confirmed they read the intake warnings. Required before AI dispatch. */
+  acknowledged?: boolean;
+  onAcknowledge?: () => void;
 }
 
-export const GateBanner: React.FC<GateBannerProps> = ({ report }) => {
+export const GateBanner: React.FC<GateBannerProps> = ({ report, acknowledged = false, onAcknowledge }) => {
   if (report.status === 'BLOCKED') {
     return (
       <div className="bg-rose-50 border border-rose-200 rounded-xl p-4 text-rose-900 shadow-2xs">
@@ -44,15 +47,33 @@ export const GateBanner: React.FC<GateBannerProps> = ({ report }) => {
               {report.summary}
             </span>
           </div>
-          <span className="text-[11px] font-medium text-amber-800 bg-amber-100/60 border border-amber-200 px-2 py-0.5 rounded-full">
-            Review Advised
-          </span>
+          {acknowledged ? (
+            <span className="inline-flex items-center space-x-1 text-[11px] font-medium text-emerald-800 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
+              <CheckCircle2 className="w-3 h-3" />
+              <span>Notices reviewed</span>
+            </span>
+          ) : (
+            <span className="text-[11px] font-medium text-amber-800 bg-amber-100/60 border border-amber-200 px-2 py-0.5 rounded-full">
+              Review required before AI dispatch
+            </span>
+          )}
         </div>
         <div className="text-[11px] text-amber-800 pl-4 space-y-0.5">
           {report.warnings.map((w, idx) => (
             <p key={idx}>• {w}</p>
           ))}
         </div>
+        {!acknowledged && onAcknowledge && (
+          <div className="pl-4 pt-1">
+            <button
+              type="button"
+              onClick={onAcknowledge}
+              className="text-[11px] font-semibold bg-amber-600 hover:bg-amber-700 text-white px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
+            >
+              I have reviewed these notices
+            </button>
+          </div>
+        )}
       </div>
     );
   }

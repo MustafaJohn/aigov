@@ -52,6 +52,32 @@ export default function Home() {
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [currentProvider, setCurrentProvider] = useState<string>('demo');
 
+  // Fail-safe gate state. AI dispatch is only possible when gatePassed is true.
+  const [gateAcknowledged, setGateAcknowledged] = useState<boolean>(false);
+  const [unresolvedUncertain, setUnresolvedUncertain] = useState<number>(0);
+
+  const gateStatus = docIR?.report.status;
+  const gateBlocked = !docIR || gateStatus === 'BLOCKED';
+  const gateNeedsAck = gateStatus === 'READY_WITH_WARNINGS' && !gateAcknowledged;
+  const gatePassed = !gateBlocked && !gateNeedsAck && unresolvedUncertain === 0;
+  const gateReason = gateBlocked
+    ? 'This document is blocked at intake and cannot be sent to an AI provider.'
+    : gateNeedsAck
+      ? 'Review the intake notices and confirm them before AI dispatch.'
+      : unresolvedUncertain > 0
+        ? `Confirm or dismiss ${unresolvedUncertain} uncertain item(s) in the review screen first.`
+        : null;
+
+  // Single entry point for navigation: the AI view is only reachable once the gate has passed.
+  const selectView = (v: typeof activeView) => {
+    if (v === 'ai' && !gatePassed) {
+      setErrorMessage(gateReason || 'Complete the review before using AI.');
+      setActiveView(docIR ? 'review' : 'intake');
+      return;
+    }
+    setActiveView(v);
+  };
+
   // Load notes from localStorage on mount
   useEffect(() => {
     try {
@@ -83,6 +109,8 @@ export default function Home() {
     setActiveView('intake');
     setDocIR(null);
     setEntities([]);
+    setGateAcknowledged(false);
+    setUnresolvedUncertain(0);
     setErrorMessage(null);
   };
 
@@ -108,6 +136,8 @@ export default function Home() {
       const data = await res.json();
       setDocIR(data.ir);
       setEntities(data.detection.entities || []);
+      setGateAcknowledged(false);
+      setUnresolvedUncertain(0);
       setActiveView('review');
     } catch (err: any) {
       setErrorMessage(`Failed to intake document: ${err.message}. Ensure backend is running on ${BACKEND_URL}.`);
@@ -192,6 +222,7 @@ export default function Home() {
     prompt: string
   ): Promise<string> => {
     if (!docIR) throw new Error('No document loaded.');
+    if (!gatePassed) throw new Error(gateReason || 'Complete the review before using AI.');
     setCurrentProvider(provider);
 
     const compiledProtectedText = compileProtectedDocument(
@@ -282,8 +313,9 @@ export default function Home() {
       {/* 1. Left Collapsible Sidebar */}
       <Sidebar
         activeView={activeView}
-        onSelectView={(v) => setActiveView(v)}
+        onSelectView={selectView}
         hasDocument={!!docIR}
+        aiLocked={!gatePassed}
         documentName={docIR?.source.filename}
         notes={notes}
         activeNoteId={activeNoteId}
@@ -358,11 +390,18 @@ export default function Home() {
             {/* If Document Loaded: Render Document Properties Header */}
             {docIR && activeView !== 'intake' && (
               <>
+                <GateBanner
+                  report={docIR.report}
+                  acknowledged={gateAcknowledged}
+                  onAcknowledge={() => setGateAcknowledged(true)}
+                />
+
                 <DocumentHeader
                   docIR={docIR}
                   entities={entities}
                   activeView={activeView}
-                  onSelectView={(v) => setActiveView(v)}
+                  onSelectView={selectView}
+                  aiLocked={!gatePassed}
                   notesCount={notes.length}
                 />
 
@@ -376,7 +415,8 @@ export default function Home() {
                     onRemoveEntity={handleRemoveEntity}
                     includeHidden={includeHidden}
                     onToggleIncludeHidden={() => setIncludeHidden(!includeHidden)}
-                    onProceedToAI={() => setActiveView('ai')}
+                    onProceedToAI={() => selectView('ai')}
+                    onUnresolvedUncertainChange={setUnresolvedUncertain}
                     onSaveDocument={handleSaveDocument}
                     onAddQuickNote={handleQuickAddNote}
                   />

@@ -27,6 +27,8 @@ interface SideBySideReviewProps {
   includeHidden: boolean;
   onToggleIncludeHidden: () => void;
   onProceedToAI: () => void;
+  /** Lets the page know how many uncertain items still block dispatch (used to lock the AI view). */
+  onUnresolvedUncertainChange?: (count: number) => void;
   onSaveDocument?: () => void;
   onAddQuickNote?: (title: string, content: string) => void;
 }
@@ -40,6 +42,7 @@ export const SideBySideReview: React.FC<SideBySideReviewProps> = ({
   includeHidden,
   onToggleIncludeHidden,
   onProceedToAI,
+  onUnresolvedUncertainChange,
   onSaveDocument,
   onAddQuickNote,
 }) => {
@@ -151,6 +154,10 @@ export const SideBySideReview: React.FC<SideBySideReviewProps> = ({
 
   const uncertainGroups = entityGroups.filter((g) => g.isUncertain && !resolvedUncertainKeys.has(g.key));
   const unresolvedUncertainCount = uncertainGroups.length;
+
+  React.useEffect(() => {
+    onUnresolvedUncertainChange?.(unresolvedUncertainCount);
+  }, [unresolvedUncertainCount, onUnresolvedUncertainChange]);
 
   const handleToggleGroup = (grp: typeof entityGroups[0]) => {
     const shouldActivate = !grp.isActive;

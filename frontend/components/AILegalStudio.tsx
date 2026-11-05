@@ -34,7 +34,8 @@ interface AILegalStudioProps {
 }
 
 // Phase 1 Task Rule: Only 'summarise' is active; other tasks flagged off until Phase 2
-const ENABLE_PHASE2_EXTENDED_TASKS = false;
+// Phase 1: summarise only. Set NEXT_PUBLIC_ENABLE_PHASE2_TASKS=true at build time to show the other tasks.
+const ENABLE_PHASE2_EXTENDED_TASKS = process.env.NEXT_PUBLIC_ENABLE_PHASE2_TASKS === 'true';
 
 const ALL_SELF_PROMPTS: SelfPromptAction[] = [
   {

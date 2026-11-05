@@ -1,11 +1,15 @@
 import hashlib
 import uuid
+import logging
 from typing import List, Tuple
 from app.models import DocumentIR, SourceInfo, ParseReport, Block, MetadataItem
 from app.parser.docx_parser import parse_docx
 from app.parser.xlsx_parser import parse_xlsx
 from app.parser.pdf_parser import parse_pdf
 from app.parser.txt_parser import parse_txt
+
+logger = logging.getLogger("aigov.intake")
+
 
 def intake_file(filename: str, content: bytes) -> DocumentIR:
     doc_id = f"doc_{uuid.uuid4().hex[:10]}"
@@ -75,14 +79,16 @@ def intake_file(filename: str, content: bytes) -> DocumentIR:
             blocks, metadata, warnings, hidden_count = parse_pdf(content)
         elif fmt == "txt":
             blocks, metadata, warnings, hidden_count = parse_txt(content)
-    except Exception as e:
+    except Exception:
+        # Parser exceptions can quote file internals; log them, show the lawyer a plain reason.
+        logger.exception("Parse failure for %s (%s, %d bytes)", filename, fmt, size_bytes)
         return DocumentIR(
             doc_id=doc_id,
             source=SourceInfo(format=fmt, filename=filename, size_bytes=size_bytes, sha256=sha256),
             report=ParseReport(
                 status="BLOCKED",
                 summary="Extraction failure.",
-                gate_reason=f"Failed to securely parse {fmt.upper()} content: {str(e)}",
+                gate_reason=f"The {fmt.upper()} file could not be read. It may be corrupted, password-protected or not a genuine {fmt.upper()} file.",
                 total_blocks=0
             )
         )
