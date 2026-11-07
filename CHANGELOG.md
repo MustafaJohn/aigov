@@ -4,6 +4,19 @@ A high-level record of architectural decisions, customer feedback fixes, and del
 
 ---
 
+## [2026-11-07] - Week 2 (part 1): DOCX hidden-content ingestion (Engineer B)
+- **Decision:** The DOCX parser now walks the WordprocessingML XML directly instead of relying on `python-docx` paragraph text, so every place a name can hide in a Word file reaches the detector.
+- **Reason:** `paragraph.text` only reads runs that are direct children of the paragraph. Text inside a tracked insertion (`w:ins`) and deleted text (`w:delText`) were silently dropped, hidden-formatted runs (`w:vanish`) were merged into visible text with no flag, and comments, footnotes, headers, footers, text boxes and custom properties were never read at all. Document properties were captured as metadata but never turned into blocks, so author names never went through detection.
+- **Key Changes:**
+  - `backend/app/parser/docx_parser.py`: rewritten. New block types `tracked_insertion`, `tracked_deletion`, `hidden_text`, `comment`, `header_footer`, `footnote`, `endnote`, `textbox`, `metadata`. `visibility` stays within `visible` / `hidden` / `metadata` so the review screen and `restore.ts` need no change; the kind shows as the existing `[type]` badge. Tracked insertions are included in the visible paragraph (they are on the page) and also reported as their own flagged block with the author. Table rows keep the previous one-block-per-row shape; nested tables and tables inside headers are covered. All six header/footer variants per section. All core properties plus `docProps/custom.xml`. Comment authors recorded as metadata.
+  - Warnings now name what was found ("1 deleted text block(s) still in the file, 1 review comment(s), …") and add a plain instruction when deleted or hidden text remains in the file.
+  - `tests/synthetic/docx_depth/`: a synthetic attendance note seeding all 13 hidden-item types, its generator script, and `*.expected.json` ground truth.
+  - `tests/eval_ingestion.py`: new harness; every seeded hidden item must surface in a block of the expected type; exit 1 on a miss so it can gate merges alongside `eval.py`. Result: 13/13.
+  - `tests/eval.py` still passes (92/92 recall). PERSON precision moved 73.6% → 72.4% because property values are now detected on; this is the honest number.
+  - Not in this PR: XLSX depth (next), PDF annotations and OCR (week 3).
+
+---
+
 ## [2026-11-16] - Week 2/3: Identity Resolution, Reviewer Feedback & Guard Hardening (Engineer A - PR 5)
 - **Decision:** Fully resolved all 13 issues and gaps raised in reviewer feedback across entity placeholders, alias resolution, outbound guard fail-safes, structured pattern protection, and pattern validators.
 - **Reason:** Satisfies Phase 1 Week 2/3 core governance requirements: eliminates cross-category placeholder pollution, prevents over-aggressive entity conversion, secures the outbound guard fail-safe when active entities are omitted, stops false blocks on common English words, protects structured PII from being swallowed, and ensures strict adherence to Ground Rule 1 (zero hardcoded name lists).
