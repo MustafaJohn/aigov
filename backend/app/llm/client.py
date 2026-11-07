@@ -1,18 +1,58 @@
+import os
 import re
+import logging
 import httpx
 from typing import Optional
 from app.models import SummarizeRequest, SummarizeResponse
 
+logger = logging.getLogger("aigov.llm")
+
+# Default model per provider. Verified against each provider's published model list on 5 Nov 2026:
+#   - claude-3-5-sonnet-20241022 was retired 28 Oct 2025; Anthropic names claude-sonnet-5-5 as the replacement.
+#   - gpt-4o-mini shuts down 14 Jan 2027; OpenAI's deprecation page names gpt-6-luna as the replacement.
+#   - gemini-1.5-flash is no longer listed; Google points new projects at gemini-3.8-flash.
+# Override without a code change by setting the env var, e.g. DEFAULT_MODEL_OPENAI=gpt-6-luna.
+DEFAULT_MODELS = {
+    "openai": os.getenv("DEFAULT_MODEL_OPENAI", "gpt-6-luna"),
+    "anthropic": os.getenv("DEFAULT_MODEL_ANTHROPIC", "claude-sonnet-5-5"),
+    "gemini": os.getenv("DEFAULT_MODEL_GEMINI", "gemini-3.8-flash"),
+}
+
+PROVIDER_TIMEOUT_SECONDS = float(os.getenv("PROVIDER_TIMEOUT_SECONDS", "90"))
+
+
+def _provider_error(provider: str, model_name: str, status_code: Optional[int], body: str, api_key: str = "") -> SummarizeResponse:
+    """
+    Log the provider's error server-side (with the API key redacted; some providers echo it back)
+    and return a generic, non-leaking message to the client. Provider error bodies can quote
+    request content and must never reach the browser.
+    """
+    safe_body = body.replace(api_key, "[REDACTED KEY]") if api_key else body
+    logger.warning("Provider %s (%s) returned HTTP %s: %s", provider, model_name, status_code, safe_body[:1000])
+    if status_code in (401, 403):
+        user_msg = f"{provider.capitalize()} rejected the API key. Check the key and try again."
+    elif status_code == 404:
+        user_msg = f"{provider.capitalize()} does not recognise the model '{model_name}'. Choose another model."
+    elif status_code == 429:
+        user_msg = f"{provider.capitalize()} rate limit or quota reached. Wait a moment and try again."
+    elif status_code is None:
+        user_msg = f"Could not reach {provider.capitalize()}. Check your connection and try again."
+    else:
+        user_msg = f"{provider.capitalize()} returned an error (HTTP {status_code}). Try again or choose another model."
+    return SummarizeResponse(success=False, summary="", provider=provider, model=model_name, error=user_msg)
+
+
 async def execute_llm_summary(req: SummarizeRequest) -> SummarizeResponse:
     provider = req.provider.lower()
     prompt = req.instructions or "Please provide a concise legal summary of this protected document."
-    
+
     system_prompt = (
-        "You are an expert UK legal assistant. You are reviewing a legally redacted and protected document. "
-        "All sensitive client names, companies, bank details, and identifiers have been masked with random jargon tokens "
-        "such as XXX_1, XYZ_2, XXX_3, etc. "
-        "Strictly reason with these jargon tokens directly without asking for unmasked identifiers. "
-        "Deliver professional, actionable, and structured UK legal analysis."
+        "You are an expert UK legal assistant reviewing a document that has been protected before being sent to you. "
+        "Sensitive items have been replaced with typed placeholders in square brackets, such as [PERSON 1], [ORG 2], "
+        "[ACCOUNT 1], [ADDRESS 1] or [DATE 1]. The same placeholder always refers to the same underlying item. "
+        "Reason using these placeholders exactly as written: never guess, infer or invent the real values, never ask for them, "
+        "and never alter or renumber a placeholder. Keep every placeholder you mention in the exact form it appears. "
+        "Deliver professional, structured UK legal analysis."
     )
 
     # 1. Mock / Demo Mode for instant offline testing without API keys
@@ -90,7 +130,7 @@ async def execute_llm_summary(req: SummarizeRequest) -> SummarizeResponse:
 
     # 2. OpenAI Provider
     if provider == "openai":
-        model_name = req.model or "gpt-4o-mini"
+        model_name = req.model or DEFAULT_MODELS["openai"]
         url = "https://api.openai.com/v1/chat/completions"
         headers = {
             "Authorization": f"Bearer {req.api_key}",
@@ -105,36 +145,20 @@ async def execute_llm_summary(req: SummarizeRequest) -> SummarizeResponse:
             "temperature": 0.2
         }
         try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
+            async with httpx.AsyncClient(timeout=PROVIDER_TIMEOUT_SECONDS) as client:
                 res = await client.post(url, headers=headers, json=payload)
                 if res.status_code != 200:
-                    return SummarizeResponse(
-                        success=False,
-                        summary="",
-                        provider=provider,
-                        model=model_name,
-                        error=f"OpenAI API Error ({res.status_code}): {res.text}"
-                    )
+                    return _provider_error(provider, model_name, res.status_code, res.text, req.api_key)
                 data = res.json()
                 summary_text = data["choices"][0]["message"]["content"]
-                return SummarizeResponse(
-                    success=True,
-                    summary=summary_text,
-                    provider=provider,
-                    model=model_name
-                )
+                return SummarizeResponse(success=True, summary=summary_text, provider=provider, model=model_name)
         except Exception as e:
-            return SummarizeResponse(
-                success=False,
-                summary="",
-                provider=provider,
-                model=model_name,
-                error=f"Failed to communicate with OpenAI: {str(e)}"
-            )
+            logger.exception("OpenAI call failed")
+            return _provider_error(provider, model_name, None, repr(e), req.api_key)
 
     # 3. Anthropic Provider
     elif provider == "anthropic":
-        model_name = req.model or "claude-3-5-sonnet-20241022"
+        model_name = req.model or DEFAULT_MODELS["anthropic"]
         url = "https://api.anthropic.com/v1/messages"
         headers = {
             "x-api-key": req.api_key,
@@ -150,37 +174,23 @@ async def execute_llm_summary(req: SummarizeRequest) -> SummarizeResponse:
             ]
         }
         try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
+            async with httpx.AsyncClient(timeout=PROVIDER_TIMEOUT_SECONDS) as client:
                 res = await client.post(url, headers=headers, json=payload)
                 if res.status_code != 200:
-                    return SummarizeResponse(
-                        success=False,
-                        summary="",
-                        provider=provider,
-                        model=model_name,
-                        error=f"Anthropic API Error ({res.status_code}): {res.text}"
-                    )
+                    return _provider_error(provider, model_name, res.status_code, res.text, req.api_key)
                 data = res.json()
                 summary_text = "".join([c.get("text", "") for c in data.get("content", [])])
-                return SummarizeResponse(
-                    success=True,
-                    summary=summary_text,
-                    provider=provider,
-                    model=model_name
-                )
+                return SummarizeResponse(success=True, summary=summary_text, provider=provider, model=model_name)
         except Exception as e:
-            return SummarizeResponse(
-                success=False,
-                summary="",
-                provider=provider,
-                model=model_name,
-                error=f"Failed to communicate with Anthropic: {str(e)}"
-            )
+            logger.exception("Anthropic call failed")
+            return _provider_error(provider, model_name, None, repr(e), req.api_key)
 
     # 4. Google Gemini Provider
     elif provider == "gemini":
-        model_name = req.model or "gemini-1.5-flash"
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={req.api_key}"
+        model_name = req.model or DEFAULT_MODELS["gemini"]
+        # Key goes in a header, not the query string, so it never lands in access logs.
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent"
+        headers = {"x-goog-api-key": req.api_key, "Content-Type": "application/json"}
         payload = {
             "system_instruction": {"parts": [{"text": system_prompt}]},
             "contents": [
@@ -188,32 +198,16 @@ async def execute_llm_summary(req: SummarizeRequest) -> SummarizeResponse:
             ]
         }
         try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                res = await client.post(url, json=payload)
+            async with httpx.AsyncClient(timeout=PROVIDER_TIMEOUT_SECONDS) as client:
+                res = await client.post(url, headers=headers, json=payload)
                 if res.status_code != 200:
-                    return SummarizeResponse(
-                        success=False,
-                        summary="",
-                        provider=provider,
-                        model=model_name,
-                        error=f"Gemini API Error ({res.status_code}): {res.text}"
-                    )
+                    return _provider_error(provider, model_name, res.status_code, res.text, req.api_key)
                 data = res.json()
                 summary_text = data["candidates"][0]["content"]["parts"][0]["text"]
-                return SummarizeResponse(
-                    success=True,
-                    summary=summary_text,
-                    provider=provider,
-                    model=model_name
-                )
+                return SummarizeResponse(success=True, summary=summary_text, provider=provider, model=model_name)
         except Exception as e:
-            return SummarizeResponse(
-                success=False,
-                summary="",
-                provider=provider,
-                model=model_name,
-                error=f"Failed to communicate with Gemini: {str(e)}"
-            )
+            logger.exception("Gemini call failed")
+            return _provider_error(provider, model_name, None, repr(e), req.api_key)
 
     return SummarizeResponse(
         success=False,

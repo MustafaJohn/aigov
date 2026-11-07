@@ -1,5 +1,6 @@
 import os
 import re
+import logging
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -25,13 +26,20 @@ app = FastAPI(
     description="Secure, fail-safe intake, PII detection, outbound guard, and BYOK LLM proxy."
 )
 
-# Enable CORS for Next.js frontend (default on localhost:3000)
+logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
+logger = logging.getLogger("aigov.api")
+
+# CORS: only the frontend origin(s) may call this API. Set ALLOWED_ORIGINS on Render as a
+# comma-separated list, e.g. "https://aigov-frontend.onrender.com". Localhost is always allowed for dev.
+# allow_credentials is off: the API uses no cookies, and "*" with credentials is invalid anyway.
+_configured_origins = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", "").split(",") if o.strip()]
+ALLOWED_ORIGINS = _configured_origins + ["http://localhost:3000", "http://127.0.0.1:3000"]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=ALLOWED_ORIGINS,
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type"],
 )
 
 detection_engine = DetectionEngine()
@@ -73,8 +81,11 @@ async def upload_document(
             ir=doc_ir,
             detection=detection_res
         )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Document intake failed: {str(e)}")
+    except Exception:
+        # Full traceback stays in server logs; the client gets a generic message. The exception text
+        # can contain file contents or library internals and must not reach the browser.
+        logger.exception("Document intake failed for %s", file.filename)
+        raise HTTPException(status_code=500, detail="The document could not be processed. Try another file or format.")
 
 @app.post("/api/guard/outbound-check", response_model=OutboundCheckResponse)
 def outbound_check(request: OutboundCheckRequest):

@@ -18,6 +18,8 @@ interface DocumentHeaderProps {
   docIR?: DocumentIR | null;
   entities: DetectedEntity[];
   activeView: 'intake' | 'review' | 'redacted_only' | 'ai' | 'notes' | 'database';
+  /** When true the AI view cannot be opened (fail-safe gate not yet passed). */
+  aiLocked?: boolean;
   onSelectView: (view: 'intake' | 'review' | 'redacted_only' | 'ai' | 'notes' | 'database') => void;
   notesCount: number;
 }
@@ -27,6 +29,7 @@ export const DocumentHeader: React.FC<DocumentHeaderProps> = ({
   entities,
   activeView,
   onSelectView,
+  aiLocked = false,
   notesCount,
 }) => {
   if (!docIR) return null;
@@ -104,7 +107,9 @@ export const DocumentHeader: React.FC<DocumentHeaderProps> = ({
 
         <button
           onClick={() => onSelectView('ai')}
-          className={`flex items-center space-x-1.5 px-3 py-2 text-xs font-medium border-b-2 transition-all cursor-pointer whitespace-nowrap ${
+          disabled={aiLocked}
+          title={aiLocked ? 'Complete the review and resolve intake notices before using AI' : undefined}
+          className={`flex items-center space-x-1.5 px-3 py-2 text-xs font-medium border-b-2 transition-all whitespace-nowrap ${aiLocked ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'} ${
             activeView === 'ai'
               ? 'border-[#37352f] text-[#37352f] font-semibold'
               : 'border-transparent text-[#787774] hover:text-[#37352f] hover:border-[#e9e9e7]'
