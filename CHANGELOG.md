@@ -4,6 +4,18 @@ A high-level record of architectural decisions, customer feedback fixes, and del
 
 ---
 
+## [2026-11-11] - Week 2 (part 2): XLSX hidden-content ingestion (Engineer B)
+- **Decision:** The XLSX parser now loads each workbook twice (cached values and formulas) and surfaces everything in the file that is not on screen: hidden rows and columns, cell comments, formula text, hyperlinks, sheet headers and footers, dropdown (data-validation) lists, defined-name constants and all workbook properties. Hidden and very-hidden sheets were already covered.
+- **Reason:** With `data_only=True` alone, any formula cell whose result was never calculated by Excel (script-generated files, some export tools) came back as `None` and vanished without a warning. Values in hidden rows and hidden columns were reported as visible. Comments, mailto links, headers/footers, dropdown options and defined names were never read, and properties were captured but never detected on.
+- **Key Changes:**
+  - `backend/app/parser/xlsx_parser.py`: rewritten. New block types `hidden_row`, `hidden_column`, `hidden_sheet_cell`, `comment`, `formula`, `hyperlink`, `header_footer`, `data_validation`, `defined_name`, `metadata`; `visibility` stays within `visible` / `hidden` / `metadata` so no frontend change. Each block text starts with a plain location prefix (`[Sheet, row 4, hidden row]`) in lower case so it does not read as a name to the detector. Formula blocks record the cached value when there is one and say "no cached value" when there is not; a warning tells the lawyer to open and save in Excel if results matter. Sheets over 5,000 rows are truncated with a warning rather than hanging the free-tier instance.
+  - `tests/synthetic/xlsx_depth/`: a synthetic schedule of loss seeding 12 hidden-item types, its generator and `*.expected.json`.
+  - `tests/eval_ingestion.py`: now 25/25 across DOCX and XLSX.
+  - `tests/eval.py`: 92/92 recall; PERSON precision 72.4% → 76.7% (the lower-case location prefixes stop the capitalised-words rule firing on "Row").
+  - Not in this PR: PDF annotations and OCR (week 3).
+
+---
+
 ## [2026-11-07] - Week 2 (part 1): DOCX hidden-content ingestion (Engineer B)
 - **Decision:** The DOCX parser now walks the WordprocessingML XML directly instead of relying on `python-docx` paragraph text, so every place a name can hide in a Word file reaches the detector.
 - **Reason:** `paragraph.text` only reads runs that are direct children of the paragraph. Text inside a tracked insertion (`w:ins`) and deleted text (`w:delText`) were silently dropped, hidden-formatted runs (`w:vanish`) were merged into visible text with no flag, and comments, footnotes, headers, footers, text boxes and custom properties were never read at all. Document properties were captured as metadata but never turned into blocks, so author names never went through detection.
