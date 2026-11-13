@@ -160,10 +160,10 @@ class DetectionEngine:
                 if len(words) >= 2:
                     cand_name = " ".join(words)
                     first_w = words[0]
-                    # Check if first word is in common names OR if candidate is not a generic title
-                    if (first_w in COMMON_FIRST_NAMES or len(words) in [2, 3]) and cand_name not in NAME_STOPWORDS:
-                        # Ensure not part of an organization (e.g. Barclays Bank or High Court)
-                        if not any(sw in cand_name for sw in ["Court", "Bank", "LLP", "Ltd", "PLC", "Council", "Chambers", "Service", "Department"]):
+                    # Check if first word is in common names (avoids false-positive generic capitalised noun sequences)
+                    if first_w in COMMON_FIRST_NAMES and cand_name not in NAME_STOPWORDS:
+                        # Ensure not part of an organization or street address (e.g. Victoria Road or Barclays Bank)
+                        if not any(sw in cand_name for sw in ["Court", "Bank", "LLP", "Ltd", "PLC", "Council", "Chambers", "Service", "Department", "Road", "Street", "Avenue", "Lane", "Drive", "Way", "Close", "Gardens", "Hill", "Walk"]):
                             placeholder = registry.get_placeholder(cand_name, "PERSON")
                             cand_start = match.start() + start_offset
                             cand_end = cand_start + len(cand_name)
@@ -179,9 +179,9 @@ class DetectionEngine:
                                 is_active=True
                             ))
 
-            # 5. Standalone party surnames introduced in legal text (e.g. "Jenkins contacted me", "session with Jenkins")
+            # 5. Standalone party surnames introduced in legal text (e.g. "Jenkins contacted me", "Adebayo-Clarke instructed us")
             party_verb_pattern = re.compile(
-                r"\b(?:with|against|by|from|to|contacted|attended|stated|confirmed|instructed)\s+([A-Z][a-z]{3,})\b|\b([A-Z][a-z]{3,})\s+(?:contacted|attended|stated|confirmed|instructed|agreed|signed|refused)\b"
+                r"\b(?:with|against|by|from|to|contacted|attended|stated|confirmed|instructed)\s+([A-Z][a-z]{2,}(?:-[A-Z][a-z]{2,})?)\b|\b([A-Z][a-z]{2,}(?:-[A-Z][a-z]{2,})?)\s+(?:contacted|attended|stated|confirmed|instructed|agreed|signed|refused)\b"
             )
             for match in party_verb_pattern.finditer(text):
                 cand_surname = match.group(1) or match.group(2)

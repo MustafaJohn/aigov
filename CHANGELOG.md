@@ -4,6 +4,17 @@ A high-level record of architectural decisions, customer feedback fixes, and del
 
 ---
 
+## [2026-11-13] - Week 2: Dependency Preparation & Pattern Generalization (Engineer A - PR 3)
+- **Decision:** Added `spacy>=3.8.0` dependency to `backend/requirements.txt`, removed test-specific words from patterns (`Priya`, `Parties Background`), generalized matter reference format for initials (`KB/2026/0912`), added hyphenated surname recognition (`Adebayo-Clarke`), and supported ampersands in law firm names (`Kingsley & Barr LLP`).
+- **Reason:** Sets up the foundation for Week 2 statistical NER and prevents test-suite overfitting while expanding coverage for genuine UK legal documents.
+- **Key Changes:**
+  - `backend/requirements.txt`: Added `spacy>=3.8.0`.
+  - `backend/app/detector/patterns.py`: Generalized `MATTER_REF` regex; updated `PERSON_TITLES_REGEX` and `ROLE_BASED_PERSON_REGEX` to support hyphenated names; updated `COMPANY_REGEX` to support ampersands in corporate entities.
+  - `backend/app/detector/engine.py`: Updated party verb matching for hyphenated surnames; restricted noun-sequence matching to common names.
+- **Verification:** Evaluated against 7 synthetic test documents with 105 seeded entities.
+
+---
+
 ## [2026-11-13] - Week 1: Shared Models Schema - Inbound Warnings & Active Entities (Engineer A - PR 2)
 - **Decision:** Updated shared schema in `backend/app/models.py` (`models.py` change) to make `active_entities: List[DetectedEntity]` an explicit field on `SummarizeRequest` and return `inbound_warnings: List[str]` as a dedicated structured field on `SummarizeResponse`.
 - **Reason:** Inbound governance notices (flags for real identifiers or new tokens introduced by the model) were previously string-concatenated into the raw Markdown summary. Moving this to a structured schema separates governance telemetry from model output and enables clean UI alert rendering.
