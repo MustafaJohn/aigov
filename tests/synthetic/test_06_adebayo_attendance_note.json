@@ -1,0 +1,96 @@
+{
+  "document": "test_06_adebayo_attendance_note.txt",
+  "description": "Family law attendance note featuring hyphenated surnames (Adebayo-Clarke), firm with ampersand (Kingsley & Barr LLP), child/client distinction, and un-prefixed surname alias",
+  "entities": [
+    {
+      "id": "e_jenkins",
+      "type": "PERSON",
+      "canonical": "Sarah Jenkins",
+      "surface_forms": [
+        "Sarah Jenkins"
+      ]
+    },
+    {
+      "id": "e_funke",
+      "type": "PERSON",
+      "canonical": "Funke Adebayo-Clarke",
+      "surface_forms": [
+        "Mrs. Funke Adebayo-Clarke",
+        "Mrs Adebayo-Clarke",
+        "Adebayo-Clarke"
+      ]
+    },
+    {
+      "id": "e_kemi",
+      "type": "PERSON",
+      "canonical": "Kemi Adebayo-Clarke",
+      "surface_forms": [
+        "Kemi Adebayo-Clarke"
+      ]
+    },
+    {
+      "id": "e_tariq",
+      "type": "PERSON",
+      "canonical": "Tariq Clarke",
+      "surface_forms": [
+        "Mr. Tariq Clarke"
+      ]
+    },
+    {
+      "id": "e_firm",
+      "type": "ORGANISATION",
+      "canonical": "Kingsley & Barr LLP",
+      "surface_forms": [
+        "Kingsley & Barr LLP"
+      ]
+    },
+    {
+      "id": "e_academy",
+      "type": "ORGANISATION",
+      "canonical": "St Jude's Catholic Academy",
+      "surface_forms": [
+        "St Jude's Catholic Academy"
+      ]
+    },
+    {
+      "id": "e_postcode",
+      "type": "UK_POSTCODE",
+      "canonical": "SW19 4TL",
+      "surface_forms": [
+        "SW19 4TL"
+      ]
+    },
+    {
+      "id": "e_phone",
+      "type": "PHONE",
+      "canonical": "020 7946 0192",
+      "surface_forms": [
+        "020 7946 0192"
+      ]
+    },
+    {
+      "id": "e_matter",
+      "type": "MATTER_REF",
+      "canonical": "KB/2026/0912",
+      "surface_forms": [
+        "KB/2026/0912"
+      ]
+    },
+    {
+      "id": "e_amount_1",
+      "type": "MONETARY_AMOUNT",
+      "canonical": "£2,400",
+      "surface_forms": [
+        "£2,400"
+      ]
+    },
+    {
+      "id": "e_amount_2",
+      "type": "MONETARY_AMOUNT",
+      "canonical": "£450",
+      "surface_forms": [
+        "£450"
+      ]
+    }
+  ]
+}

@@ -43,6 +43,12 @@ TARGETS = {
     "HIDDEN_CONTENT": 100.0,
 }
 
+PRECISION_TARGETS = {
+    "PERSON": 90.0,       # Start at 90% for PERSON
+    "ORGANISATION": 85.0,
+    "STRUCTURED": 95.0,
+}
+
 STRUCTURED_TYPES = {
     "NI_NUMBER", "SORT_CODE", "ACCOUNT_NUMBER", "CREDIT_CARD",
     "UK_POSTCODE", "PHYSICAL_ADDRESS", "EMAIL", "PHONE",
@@ -58,6 +64,15 @@ class MissRecord:
         self.ent_type = ent_type
         self.context = context
         self.reason = reason
+
+
+class FalsePositiveRecord:
+    """Represents a false-positive detection for the backlog."""
+    def __init__(self, doc_name: str, detected_text: str, ent_type: str, context: str):
+        self.doc_name = doc_name
+        self.detected_text = detected_text
+        self.ent_type = ent_type
+        self.context = context
 
 
 class TypeStats:
@@ -97,24 +112,26 @@ def find_occurrences(text: str, sub: str) -> List[Tuple[int, int]]:
     return positions
 
 
-def run_evaluation(synthetic_dir: Path) -> Tuple[Dict[str, TypeStats], List[MissRecord], List[str]]:
+def run_evaluation(synthetic_dir: Path) -> Tuple[Dict[str, TypeStats], List[MissRecord], List[str], List[FalsePositiveRecord]]:
     """
     Runs intake and detection over all synthetic test cases in tests/synthetic/.
     Returns:
       - stats_by_type: stats per identifier type
       - misses: list of missed entities with context
       - ingestion_warnings: list of hidden content ingestion issues
+      - false_positives_list: list of false positive detections with context
     """
     engine = DetectionEngine()
     gt_files = sorted(synthetic_dir.glob("*.json"))
 
     if not gt_files:
         print(f"No ground-truth (.json) files found in {synthetic_dir}")
-        return {}, [], []
+        return {}, [], [], []
 
     stats_by_type: Dict[str, TypeStats] = {}
     misses: List[MissRecord] = []
     ingestion_warnings: List[str] = []
+    false_positives_list: List[FalsePositiveRecord] = []
 
     for gt_path in gt_files:
         with open(gt_path, "r", encoding="utf-8") as f:
@@ -230,10 +247,32 @@ def run_evaluation(synthetic_dir: Path) -> Tuple[Dict[str, TypeStats], List[Miss
                     stats_by_type[det_type] = TypeStats()
                 stats_by_type[det_type].false_positives += 1
 
-    return stats_by_type, misses, ingestion_warnings
+                # Extract sentence context snippet from block
+                matching_block = next((b for b in doc_ir.blocks if b.id == det.block_id), None)
+                if matching_block:
+                    snippet_start = max(0, det.start - 25)
+                    snippet_end = min(len(matching_block.text), det.end + 25)
+                    snippet = matching_block.text[snippet_start:snippet_end].replace("\n", " ").strip()
+                    ctx = f"...{snippet}..."
+                else:
+                    ctx = f"block {det.block_id}"
+
+                false_positives_list.append(FalsePositiveRecord(
+                    doc_name=doc_filename,
+                    detected_text=det.text,
+                    ent_type=det_type,
+                    context=ctx
+                ))
+
+    return stats_by_type, misses, ingestion_warnings, false_positives_list
 
 
-def print_report(stats: Dict[str, TypeStats], misses: List[MissRecord], ingestion_warnings: List[str]):
+def print_report(
+    stats: Dict[str, TypeStats],
+    misses: List[MissRecord],
+    ingestion_warnings: List[str],
+    false_positives: List[FalsePositiveRecord]
+):
     print("\n" + "=" * 78)
     print(" AI GOVERNANCE GATEWAY — EVALUATION HARNESS REPORT")
     print("=" * 78)
@@ -255,13 +294,17 @@ def print_report(stats: Dict[str, TypeStats], misses: List[MissRecord], ingestio
         total_fp += st.false_positives
 
         if ent_type == "PERSON":
-            target_str = ">= 97%"
-            status_icon = "[OK]" if st.recall >= 97.0 else "[X]"
+            target_str = "R>=97 P>=90"
+            rec_ok = st.recall >= TARGETS["PERSON"]
+            prec_ok = st.precision >= PRECISION_TARGETS.get("PERSON", 90.0)
+            status_icon = "[OK]" if (rec_ok and prec_ok) else "[X]"
         elif ent_type == "ORGANISATION":
-            target_str = ">= 95%"
-            status_icon = "[OK]" if st.recall >= 95.0 else "[X]"
+            target_str = "R>=95 P>=85"
+            rec_ok = st.recall >= TARGETS["ORGANISATION"]
+            prec_ok = st.precision >= PRECISION_TARGETS.get("ORGANISATION", 85.0)
+            status_icon = "[OK]" if (rec_ok and prec_ok) else "[X]"
         elif ent_type in STRUCTURED_TYPES:
-            target_str = "100%"
+            target_str = "R=100%"
             status_icon = "[OK]" if st.recall >= 100.0 else "[X]"
         else:
             target_str = "-"
@@ -269,7 +312,7 @@ def print_report(stats: Dict[str, TypeStats], misses: List[MissRecord], ingestio
 
         print(
             f"{ent_type:<20} | {st.expected:<9} | {st.detected:<9} | "
-            f"{st.recall:>6.1f}%  | {st.precision:>7.1f}%  | {target_str:<7} {status_icon}"
+            f"{st.recall:>6.1f}%  | {st.precision:>7.1f}%  | {target_str:<11} {status_icon}"
         )
 
     print("-" * 78)
@@ -290,12 +333,22 @@ def print_report(stats: Dict[str, TypeStats], misses: List[MissRecord], ingestio
     # Detection Miss Backlog
     if misses:
         print(f"\n[-] DETECTION MISS LIST / BACKLOG ({len(misses)} misses):")
-        print(f"{'Doc':<25} | {'Type':<15} | {'Surface Form':<20} | Context / Reason")
+        print(f"{'Doc':<32} | {'Type':<15} | {'Surface Form':<20} | Context / Reason")
         print("-" * 78)
         for m in misses:
-            print(f"{m.doc_name:<25} | {m.ent_type:<15} | {m.surface_form:<20} | {m.reason} in: {m.context}")
+            print(f"{m.doc_name:<32} | {m.ent_type:<15} | {m.surface_form:<20} | {m.reason} in: {m.context}")
     else:
         print("\n[+] Zero detection misses across test set!")
+
+    # False Positives Backlog
+    if false_positives:
+        print(f"\n[?] FALSE POSITIVES LIST / BACKLOG ({len(false_positives)} items):")
+        print(f"{'Doc':<32} | {'Type':<15} | {'Detected Text':<20} | Context")
+        print("-" * 78)
+        for fp in false_positives:
+            print(f"{fp.doc_name:<32} | {fp.ent_type:<15} | {fp.detected_text:<20} | in: {fp.context}")
+    else:
+        print("\n[+] Zero false positive detections across test set!")
 
     print("\n" + "=" * 78 + "\n")
 
@@ -362,8 +415,8 @@ def main():
         print(f"Error: {synthetic_dir} does not exist.")
         sys.exit(1)
 
-    stats, misses, warnings = run_evaluation(synthetic_dir)
-    print_report(stats, misses, warnings)
+    stats, misses, warnings, false_positives = run_evaluation(synthetic_dir)
+    print_report(stats, misses, warnings, false_positives)
 
     # Run Phase 1 Fail-Safe Gate Evaluation
     print("--- Phase 1 Exit Criteria Checks ---")
@@ -373,21 +426,37 @@ def main():
     else:
         print(f"[X] Outbound Fail-Safe Gate FAILED: {fs_msg}")
 
-    # Check whether all required recall targets are satisfied
+    # Check whether all required recall AND precision targets are satisfied
     all_targets_met = True
+    failed_reasons = []
     for ent_type, st in stats.items():
-        if ent_type == "PERSON" and st.recall < TARGETS["PERSON"]:
-            all_targets_met = False
-        elif ent_type == "ORGANISATION" and st.recall < TARGETS["ORGANISATION"]:
-            all_targets_met = False
+        if ent_type == "PERSON":
+            if st.recall < TARGETS["PERSON"]:
+                all_targets_met = False
+                failed_reasons.append(f"PERSON recall {st.recall:.1f}% < target {TARGETS['PERSON']}%")
+            if st.precision < PRECISION_TARGETS["PERSON"]:
+                all_targets_met = False
+                failed_reasons.append(f"PERSON precision {st.precision:.1f}% < target {PRECISION_TARGETS['PERSON']}%")
+        elif ent_type == "ORGANISATION":
+            if st.recall < TARGETS["ORGANISATION"]:
+                all_targets_met = False
+                failed_reasons.append(f"ORGANISATION recall {st.recall:.1f}% < target {TARGETS['ORGANISATION']}%")
+            if st.precision < PRECISION_TARGETS["ORGANISATION"]:
+                all_targets_met = False
+                failed_reasons.append(f"ORGANISATION precision {st.precision:.1f}% < target {PRECISION_TARGETS['ORGANISATION']}%")
         elif ent_type in STRUCTURED_TYPES and st.recall < TARGETS["STRUCTURED"]:
             all_targets_met = False
+            failed_reasons.append(f"{ent_type} recall {st.recall:.1f}% < target {TARGETS['STRUCTURED']}%")
 
     if not all_targets_met or not fs_ok:
-        print("\n[!] Build FAILED: One or more Phase 1 targets were not met.")
+        print("\n[!] Build FAILED: One or more Phase 1 targets were not met:")
+        for r in failed_reasons:
+            print(f"   - {r}")
+        if not fs_ok:
+            print(f"   - Outbound gate failed: {fs_msg}")
         sys.exit(1)
     else:
-        print("[+] Build PASSED: All Phase 1 recall and fail-safe exit criteria satisfied.")
+        print("[+] Build PASSED: All Phase 1 recall, precision, and fail-safe exit criteria satisfied.")
 
 
 if __name__ == "__main__":
