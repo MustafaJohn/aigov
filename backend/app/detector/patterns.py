@@ -57,7 +57,8 @@ PATTERNS = {
         "placeholder_type": "DRIVING LICENCE"
     },
     "MATTER_REF": {
-        "regex": re.compile(r"\b(?:MAT|REF|CLM|FILE|CAS|CASE|ACT)[\/-][A-Za-z0-9\/-]{4,15}\b", re.IGNORECASE),
+        # Matter references: uppercase legal prefixes (MAT, REF, CLM, FILE, CAS, CASE, ACT, EMP) or uppercase law firm initials with year/number (e.g. KB/2026/0912)
+        "regex": re.compile(r"\b(?:(?:MAT|REF|CLM|FILE|CAS|CASE|ACT|EMP)[\/-][A-Za-z0-9\/-]{4,15}|[A-Z]{2,4}\/\d{4}\/[A-Za-z0-9\/-]{3,10})\b"),
         "label": "Matter/Case Ref",
         "placeholder_type": "MATTER"
     },
@@ -73,17 +74,17 @@ PATTERNS = {
     }
 }
 
-# 1. Honorifics and Titles for Person Detection (matches single surnames e.g. "Mrs Patel" as well as full names e.g. "Mr Jonathan Vance")
+# 1. Honorifics and Titles for Person Detection (matches single surnames e.g. "Mrs Patel", full names, and hyphenated names e.g. "Mrs Adebayo-Clarke")
 PERSON_TITLES_REGEX = re.compile(
-    r"\b(?:Mr\.?|Mrs\.?|Ms\.?|Miss|Dr\.?|Prof\.?|Lord|Lady|Sir|Dame|Justice|Judge|Baroness|Master|Hon\.?)[ \t]+[A-Z][a-z]+(?:[ \t]+[A-Z][a-z]+){0,2}\b"
+    r"\b(?:Mr\.?|Mrs\.?|Ms\.?|Miss|Dr\.?|Prof\.?|Lord|Lady|Sir|Dame|Justice|Judge|Baroness|Master|Hon\.?)[ \t]+[A-Z][a-z]+(?:-[A-Z][a-z]+)?(?:[ \t]+[A-Z][a-z]+(?:-[A-Z][a-z]+)?){0,2}\b"
 )
 
-# 2. Role-based Person Detection (legal contracts, notarised deeds, witness statements, general documents)
+# 2. Role-based Person Detection (legal contracts, notarised deeds, witness statements, attendance notes)
 ROLE_BASED_PERSON_REGEX = re.compile(
-    r"(?i:\b(?:Claimant|Respondent|Defendant|Plaintiff|Appellant|Solicitor|Counsel|Partner|Director|Witness|Author|Client|Party(?:\s+[A-Z])?|Name|Full\s+Name|Candidate|Employee|Applicant|Prepared\s+by|Attn|Attention|Dear|Notary(?:\s+Public)?|Commissioner(?:\s+for\s+Oaths)?|Sworn\s+by|Signed\s+by|Executed\s+by|In\s+the\s+presence\s+of)\b)[ \t]*[:\-–]?[ \t]*([A-Z][a-z]+(?:[ \t]+[A-Z][a-z]+){0,2})\b"
+    r"(?i:\b(?:Claimant|Respondent|Defendant|Plaintiff|Appellant|Solicitor|Counsel|Fee\s+Earner|Partner|Director|Witness|Author|Client|Party(?:\s+[A-Z])?|Name|Full\s+Name|Candidate|Employee|Applicant|Prepared\s+by|Attn|Attention|Dear|Notary(?:\s+Public)?|Commissioner(?:\s+for\s+Oaths)?|Sworn\s+by|Signed\s+by|Executed\s+by|In\s+the\s+presence\s+of|daughter|son|child|mother|father|spouse|husband|wife)\b)[ \t]*[:\-–,]?[ \t]*([A-Z][a-z]+(?:-[A-Z][a-z]+)?(?:[ \t]+[A-Z][a-z]+(?:-[A-Z][a-z]+)?){0,2})\b"
 )
 
-# 3. Curated Common First Names in legal/business contexts
+# 3. Curated Common First Names in legal/business contexts (no test-specific names)
 COMMON_FIRST_NAMES = {
     "John", "Jonathan", "Jane", "Elizabeth", "Arthur", "David", "Robert", "Sarah", "Michael",
     "James", "William", "Richard", "Thomas", "Charles", "Christopher", "Daniel", "Matthew",
@@ -94,24 +95,26 @@ COMMON_FIRST_NAMES = {
     "Samuel", "Joseph", "Sebastian", "Julian", "Marcus", "Nicholas", "Dominic", "Philip",
     "Simon", "Stephen", "Martin", "Patrick", "Rachel", "Rebecca", "Laura", "Helen", "Anna",
     "Sophie", "Eleanor", "Lucy", "Megan", "Zoe", "Chloe", "Fiona", "Gemma", "Catherine",
-    "Priya", "Ali", "Khan", "Ahmed", "Kumar", "Singh", "Sharma", "Hussain", "Chen", "Wang", "Zhang", "Liu", "Yang"
+    "Ali", "Khan", "Ahmed", "Kumar", "Singh", "Sharma", "Hussain", "Chen", "Wang", "Zhang", "Liu", "Yang"
 }
 
 # Words to exclude from generic name matching
 NAME_STOPWORDS = {
     "High Court", "Supreme Court", "Crown Court", "Privileged Legal", "Civil Procedure",
     "Summary Judgment", "Legal Memorandum", "Common Law", "Data Protection", "United Kingdom",
-    "European Union", "Barclays Bank", "Parties Background", "Core Obligations", "Asset Transfer",
+    "European Union", "Barclays Bank", "Core Obligations", "Asset Transfer",
     "Commercial Dispute", "Draft Terms", "Subject Proposed", "Curriculum Vitae", "Work Experience",
     "Education Background", "Professional Summary", "Key Skills", "Technical Skills", "Employment History",
     "Contact Information", "Personal Profile", "References Available", "Driving Licence", "Passport Number",
-    "National Insurance", "Sort Code", "Account Number", "Bank Account", "United States", "London High"
+    "National Insurance", "Sort Code", "Account Number", "Bank Account", "United States", "London High",
+    "Governing Law", "Jurisdiction Clause", "This Agreement", "Each Party", "Entire Agreement", "The Parties",
+    "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"
 }
 
-# 4. Company & Organisation Detection (Including schools, care homes, clinics, councils, agencies)
+# 4. Company & Organisation Detection (Including firms with &, schools, care homes, clinics, councils, agencies)
 # Exclude "National Insurance" from being matched as a company
 COMPANY_REGEX = re.compile(
-    r"\b(?!(?:UK\s+)?National\s+Insurance)(?:[A-Z][A-Za-z0-9'&.-]+\s+){1,4}(?:LLP|Ltd\.?|Limited|PLC|LLC|Inc\.?|Corp\.?|Corporation|Holdings|Partners|Chambers|Solicitors|Law\s+Firm|Assurance|Insurance|Group|School|Primary\s+School|Secondary\s+School|Academy|College|University|Hospital|Clinic|Care\s+Home|Council|Association|Agency|Trust|Foundation|Centre|Center)\b"
+    r"\b(?!(?:UK\s+)?National\s+Insurance)(?:(?:[A-Z][A-Za-z0-9'.-]+|&)\s+){1,4}(?:LLP|Ltd\.?|Limited|PLC|LLC|Inc\.?|Corp\.?|Corporation|Holdings|Partners|Chambers|Solicitors|Law\s+Firm|Assurance|Insurance|Group|School|Primary\s+School|Secondary\s+School|Academy|College|University|Hospital|Clinic|Care\s+Home|Council|Association|Agency|Trust|Foundation|Centre|Center)\b"
 )
 
 # 5. Major Financial Institutions & Banks
