@@ -80,10 +80,12 @@ class SummarizeRequest(BaseModel):
     model: Optional[str] = None
     protected_text: str
     instructions: Optional[str] = "Provide a concise legal summary of the following document."
+    active_entities: List[DetectedEntity] = Field(default_factory=list)
 
 class SummarizeResponse(BaseModel):
     success: bool
     summary: str
     provider: str
     model: str
+    inbound_warnings: List[str] = Field(default_factory=list)
     error: Optional[str] = None

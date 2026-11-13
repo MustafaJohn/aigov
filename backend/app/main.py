@@ -92,20 +92,9 @@ def outbound_check(request: OutboundCheckRequest):
     return GuardEngine.check_outbound(request)
 
 @app.post("/api/llm/summarize", response_model=SummarizeResponse)
-async def summarize(request: SummarizeRequest, raw_req: Request):
-    # 1. Dynamically extract active_entities from JSON payload if provided (schema remains frozen)
-    active_entities: List[DetectedEntity] = []
-    try:
-        body = await raw_req.json()
-        raw_ents = body.get("active_entities", [])
-        if isinstance(raw_ents, list):
-            for item in raw_ents:
-                try:
-                    active_entities.append(DetectedEntity.model_validate(item))
-                except Exception:
-                    pass
-    except Exception:
-        pass
+async def summarize(request: SummarizeRequest):
+    # 1. Use typed active_entities from request
+    active_entities: List[DetectedEntity] = request.active_entities
 
     # 2. Server-side Outbound Guard: check all surface forms & aliases against document and prompt
     if active_entities:
@@ -147,12 +136,11 @@ async def summarize(request: SummarizeRequest, raw_req: Request):
     # 4. Dispatch to LLM provider
     response = await execute_llm_summary(request)
 
-    # 5. Inbound scan verification on the AI response
+    # 5. Inbound scan verification on the AI response (returned as its own typed field)
+    inbound_warnings: List[str] = []
     if response.success and response.summary and active_entities:
         inbound_warnings = GuardEngine.check_inbound(response.summary, active_entities)
-        if inbound_warnings:
-            warnings_text = "\n\n> [!WARNING] **AI Governance Notice (Inbound Check):**\n> " + "\n> ".join(inbound_warnings)
-            response.summary += warnings_text
+    response.inbound_warnings = inbound_warnings
 
     return response
 

@@ -90,6 +90,7 @@ export interface AIChatMessage {
   text: string;
   timestamp: string;
   promptTitle?: string;
+  inbound_warnings?: string[];
 }
 
 export interface AuditRecord {

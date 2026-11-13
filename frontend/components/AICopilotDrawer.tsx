@@ -19,7 +19,7 @@ import { downloadTextFile } from '../lib/restore';
 interface AICopilotDrawerProps {
   isOpen: boolean;
   onClose: () => void;
-  onExecutePrompt: (provider: string, apiKey: string, model: string, prompt: string) => Promise<string>;
+  onExecutePrompt: (provider: string, apiKey: string, model: string, prompt: string) => Promise<{ summary: string; inbound_warnings?: string[] } | string>;
   onAddToNotes: (title: string, content: string, category?: any) => void;
   isLoading: boolean;
 }
@@ -103,7 +103,8 @@ export const AICopilotDrawer: React.FC<AICopilotDrawerProps> = ({
     setMessages((prev) => [...prev, userMsg]);
 
     try {
-      const answer = await onExecutePrompt(provider, apiKey, model, item.prompt);
+      const res = await onExecutePrompt(provider, apiKey, model, item.prompt);
+      const answer = typeof res === 'string' ? res : res.summary;
       const aiMsg: AIChatMessage = {
         id: `msg_${Date.now()}_a`,
         sender: 'assistant',
@@ -141,7 +142,8 @@ export const AICopilotDrawer: React.FC<AICopilotDrawerProps> = ({
     setMessages((prev) => [...prev, userMsg]);
 
     try {
-      const answer = await onExecutePrompt(provider, apiKey, model, promptText);
+      const res = await onExecutePrompt(provider, apiKey, model, promptText);
+      const answer = typeof res === 'string' ? res : res.summary;
       const aiMsg: AIChatMessage = {
         id: `msg_${Date.now()}_a`,
         sender: 'assistant',

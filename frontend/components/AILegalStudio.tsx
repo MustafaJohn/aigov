@@ -28,7 +28,7 @@ interface AILegalStudioProps {
   blocks: Block[];
   entities: DetectedEntity[];
   includeHidden: boolean;
-  onExecutePrompt: (provider: string, apiKey: string, model: string, prompt: string) => Promise<string>;
+  onExecutePrompt: (provider: string, apiKey: string, model: string, prompt: string) => Promise<{ summary: string; inbound_warnings?: string[] } | string>;
   onAddToNotes: (title: string, content: string, category?: any) => void;
   isLoading: boolean;
 }
@@ -119,11 +119,14 @@ export const AILegalStudio: React.FC<AILegalStudioProps> = ({
     setChatHistory((prev) => [...prev, userMsg]);
 
     try {
-      const resultText = await onExecutePrompt(provider, apiKey, model, item.prompt);
+      const res = await onExecutePrompt(provider, apiKey, model, item.prompt);
+      const summaryText = typeof res === 'string' ? res : res.summary;
+      const inboundWarnings = typeof res === 'object' ? (res.inbound_warnings || []) : [];
       const aiMsg: AIChatMessage = {
         id: `msg_${Date.now()}_a`,
         sender: 'assistant',
-        text: resultText,
+        text: summaryText,
+        inbound_warnings: inboundWarnings,
         promptTitle: item.title,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       };
@@ -157,11 +160,14 @@ export const AILegalStudio: React.FC<AILegalStudioProps> = ({
     setChatHistory((prev) => [...prev, userMsg]);
 
     try {
-      const resultText = await onExecutePrompt(provider, apiKey, model, promptText);
+      const res = await onExecutePrompt(provider, apiKey, model, promptText);
+      const summaryText = typeof res === 'string' ? res : res.summary;
+      const inboundWarnings = typeof res === 'object' ? (res.inbound_warnings || []) : [];
       const aiMsg: AIChatMessage = {
         id: `msg_${Date.now()}_a`,
         sender: 'assistant',
-        text: resultText,
+        text: summaryText,
+        inbound_warnings: inboundWarnings,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       };
       setChatHistory((prev) => [...prev, aiMsg]);
@@ -200,11 +206,11 @@ export const AILegalStudio: React.FC<AILegalStudioProps> = ({
               <h3 className="font-bold text-sm text-slate-900">AI Legal Intelligence Studio</h3>
               <span className="text-[10px] bg-emerald-50 text-emerald-800 font-semibold px-2 py-0.5 rounded-full border border-emerald-200 flex items-center gap-1">
                 <ShieldCheck className="w-3 h-3 text-emerald-600" />
-                Protected (XXX / XYZ Only)
+                Protected (Typed Placeholders)
               </span>
             </div>
             <p className="text-xs text-slate-500">
-              The AI operates on {activeEntities.length} masked tokens. Unmasked client PII never leaves your browser.
+              Only the protected text is sent to the AI provider. Real values are restored in your browser.
             </p>
           </div>
         </div>
@@ -422,6 +428,21 @@ export const AILegalStudio: React.FC<AILegalStudioProps> = ({
 
                   return (
                     <div className="space-y-3">
+                      {/* Inbound Warnings Notice (shown beside/above text, not injected inside it) */}
+                      {msg.inbound_warnings && msg.inbound_warnings.length > 0 && (
+                        <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-900 space-y-1">
+                          <div className="font-semibold flex items-center gap-1.5 text-amber-800">
+                            <ShieldCheck className="w-4 h-4 text-amber-600 flex-shrink-0" />
+                            <span>AI Governance Notice (Inbound Scan):</span>
+                          </div>
+                          <ul className="list-disc list-inside space-y-0.5 text-amber-800 text-[11px]">
+                            {msg.inbound_warnings.map((warn, wIdx) => (
+                              <li key={wIdx}>{warn}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+
                       {/* View Switcher & Restoration Status Banner (Deliverable 9) */}
                       <div className="flex flex-wrap items-center justify-between gap-2 p-2.5 rounded-lg bg-slate-50 border border-slate-200 text-xs">
                         <div className="flex items-center space-x-1">
