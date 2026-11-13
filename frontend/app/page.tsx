@@ -220,7 +220,7 @@ export default function Home() {
     apiKey: string,
     selectedModel: string,
     prompt: string
-  ): Promise<string> => {
+  ): Promise<{ summary: string; inbound_warnings: string[] }> => {
     if (!docIR) throw new Error('No document loaded.');
     if (!gatePassed) throw new Error(gateReason || 'Complete the review before using AI.');
     setCurrentProvider(provider);
@@ -254,7 +254,10 @@ export default function Home() {
       throw new Error(data.error || 'AI execution failed');
     }
 
-    return data.summary;
+    return {
+      summary: data.summary,
+      inbound_warnings: data.inbound_warnings || [],
+    };
   };
 
   // Notes Handlers
