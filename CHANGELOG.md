@@ -4,6 +4,31 @@ A high-level record of architectural decisions, customer feedback fixes, and del
 
 ---
 
+## [2026-11-13] - Week 1: Shared Models Schema - Inbound Warnings & Active Entities (Engineer A - PR 2)
+- **Decision:** Updated shared schema in `backend/app/models.py` (`models.py` change) to make `active_entities: List[DetectedEntity]` an explicit field on `SummarizeRequest` and return `inbound_warnings: List[str]` as a dedicated structured field on `SummarizeResponse`.
+- **Reason:** Inbound governance notices (flags for real identifiers or new tokens introduced by the model) were previously string-concatenated into the raw Markdown summary. Moving this to a structured schema separates governance telemetry from model output and enables clean UI alert rendering.
+- **Key Changes:**
+  - `backend/app/models.py`: Added `active_entities: List[DetectedEntity]` to `SummarizeRequest`; added `inbound_warnings: List[str]` to `SummarizeResponse`.
+  - `backend/app/main.py`: Updated `/api/llm/summarize` to return `inbound_warnings` as a typed list rather than injecting warning text into `summary`.
+  - `frontend/lib/types.ts`: Added `inbound_warnings?: string[]` to `AIChatMessage`.
+  - `frontend/app/page.tsx`: Updated `handleExecutePrompt` to return `{ summary, inbound_warnings }`.
+  - `frontend/components/AILegalStudio.tsx`: Rendered inbound warnings in a dedicated alert banner beside/above the output text; updated protection claim text to reflect server-side parsing and browser-side restoration.
+  - `frontend/components/AICopilotDrawer.tsx`: Updated response handler to support structured summary payload.
+- **Verification:** `npx tsc --noEmit` passed with 0 errors.
+
+---
+
+## [2026-11-13] - Week 1: Evaluation Harness Honesty & Unseen Benchmark (Engineer A - PR 1)
+- **Decision:** Added unseen test documents from the review and upgraded `tests/eval.py` to measure Precision alongside Recall and print a complete false-positive backlog with sentence context.
+- **Reason:** Satisfies Phase 1 Week 1 mandate: "Make the harness honest. Record the real baseline. Print the false-positive backlog."
+- **Key Changes:**
+  - `tests/synthetic/test_06_adebayo_attendance_note.txt` & `.json`: Attendance note exercising hyphenated surnames (`Adebayo-Clarke`), law firms with ampersands (`Kingsley & Barr LLP`), child/client distinction, and un-prefixed surname aliases.
+  - `tests/synthetic/test_07_no_personal_data_clause.txt` & `.json`: Zero-PII commercial contract boilerplate (governing law, jurisdiction, severability) to evaluate false positive rates.
+  - `tests/eval.py`: Added `FalsePositiveRecord` accumulator; added precision targets (`PERSON: >= 90%`, `ORGANISATION: >= 85%`); prints detailed false-positive backlog table with document name and sentence context; gates build failure on precision drop.
+- **Verification:** Baseline recorded on 7 synthetic test documents (105 seeded entities). Baseline surfaced false-positive backlog items to be resolved via statistical NER in Week 2.
+
+---
+
 ## [2026-11-05] - Week 1 Hygiene: Fail-Safe Gate Enforcement, CORS, Error Handling & Model Defaults (Engineer B)
 - **Decision:** Closed the week-1 hygiene items from the Phase 1 plan: the fail-safe gate is now enforced end to end, the API only answers the frontend origin, no exception text or provider error body reaches the browser, and the three provider defaults point at models that still exist.
 - **Reason:** `GateBanner` was imported but never rendered, so intake warnings and blocks were invisible and the AI view was reachable from the sidebar regardless of document state. CORS was `*` with credentials. Intake and provider errors echoed internals (including, in OpenAI's case, the API key). All three default model IDs were retired or scheduled for shutdown.
