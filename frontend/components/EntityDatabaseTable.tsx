@@ -19,7 +19,7 @@ interface EntityDatabaseTableProps {
   entities: DetectedEntity[];
   onToggleEntity: (entityId: string) => void;
   onRemoveEntity: (entityId: string) => void;
-  onAddManualEntity: (text: string) => void;
+  onAddManualEntity: (text: string, blockId?: string, entityType?: string) => void;
 }
 
 export const EntityDatabaseTable: React.FC<EntityDatabaseTableProps> = ({
@@ -31,6 +31,7 @@ export const EntityDatabaseTable: React.FC<EntityDatabaseTableProps> = ({
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedType, setSelectedType] = useState<string>('ALL');
   const [newTerm, setNewTerm] = useState<string>('');
+  const [newTermType, setNewTermType] = useState<string>('PERSON');
 
   const types = Array.from(new Set(entities.map((e) => e.type)));
 
@@ -50,7 +51,7 @@ export const EntityDatabaseTable: React.FC<EntityDatabaseTableProps> = ({
   const handleAddSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newTerm.trim()) return;
-    onAddManualEntity(newTerm.trim());
+    onAddManualEntity(newTerm.trim(), undefined, newTermType);
     setNewTerm('');
   };
 
@@ -108,8 +109,18 @@ export const EntityDatabaseTable: React.FC<EntityDatabaseTableProps> = ({
               value={newTerm}
               onChange={(e) => setNewTerm(e.target.value)}
               placeholder="+ Add redaction term..."
-              className="text-xs px-2.5 py-1.5 rounded-lg border border-[#e9e9e7] bg-white focus:outline-none focus:ring-1 focus:ring-[#37352f] w-40 sm:w-48"
+              className="text-xs px-2.5 py-1.5 rounded-lg border border-[#e9e9e7] bg-white focus:outline-none focus:ring-1 focus:ring-[#37352f] w-36 sm:w-44"
             />
+            <select
+              value={newTermType}
+              onChange={(e) => setNewTermType(e.target.value)}
+              className="text-xs px-2 py-1.5 rounded-lg border border-[#e9e9e7] bg-white text-[#37352f] focus:outline-none cursor-pointer"
+            >
+              <option value="PERSON">Person</option>
+              <option value="ORGANISATION">Org</option>
+              <option value="ACCOUNT_NUMBER">Account</option>
+              <option value="CUSTOM">Custom</option>
+            </select>
             <button
               type="submit"
               disabled={!newTerm.trim()}

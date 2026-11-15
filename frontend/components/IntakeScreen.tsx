@@ -156,7 +156,7 @@ export const IntakeScreen: React.FC<IntakeScreenProps> = ({
         <div className="flex items-start space-x-2.5 text-xs text-slate-500 pt-1">
           <Shield className="w-4 h-4 text-emerald-600 flex-shrink-0 mt-0.5" />
           <p>
-            <strong>Local & Ephemeral:</strong> Raw documents are parsed in ephemeral memory.
+            Your document is processed on our UK server to find sensitive items. It is not stored after processing.
             Client identifiers are replaced with typed placeholders before any AI prompt is sent.
           </p>
         </div>

@@ -13,7 +13,11 @@ import {
   Sparkles,
   Search,
   Filter,
-  FileText
+  FileText,
+  User,
+  Building2,
+  CreditCard,
+  Shield
 } from 'lucide-react';
 import { Block, DetectedEntity } from '../lib/types';
 import { generateProtectedBlockText, compileProtectedDocument, downloadTextFile, generateNextJargon } from '../lib/restore';
@@ -22,7 +26,7 @@ interface SideBySideReviewProps {
   blocks: Block[];
   entities: DetectedEntity[];
   onToggleEntity: (entityId: string) => void;
-  onAddManualEntity: (text: string, blockId?: string, start?: number, end?: number) => void;
+  onAddManualEntity: (text: string, blockId?: string, entityType?: string) => void;
   onRemoveEntity: (entityId: string) => void;
   includeHidden: boolean;
   onToggleIncludeHidden: () => void;
@@ -90,9 +94,11 @@ export const SideBySideReview: React.FC<SideBySideReviewProps> = ({
     }
   };
 
-  const handleManualHighlightClick = () => {
+  const [customTermType, setCustomTermType] = useState<string>('PERSON');
+
+  const handleManualHighlightClick = (entityType: string = 'PERSON') => {
     if (!selectedText) return;
-    onAddManualEntity(selectedText, selectionContext?.blockId);
+    onAddManualEntity(selectedText, selectionContext?.blockId, entityType);
     setSelectedText('');
     setSelectionContext(null);
     window.getSelection()?.removeAllRanges();
@@ -101,7 +107,7 @@ export const SideBySideReview: React.FC<SideBySideReviewProps> = ({
   const handleAddCustomTermSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!customTerm.trim()) return;
-    onAddManualEntity(customTerm.trim());
+    onAddManualEntity(customTerm.trim(), undefined, customTermType);
     setCustomTerm('');
   };
 
@@ -138,9 +144,9 @@ export const SideBySideReview: React.FC<SideBySideReviewProps> = ({
           ids: [ent.id],
           count: 1,
           isActive: ent.is_active,
-          isManual: Boolean((ent as any).is_manual),
+          isManual: Boolean(ent.is_manual),
           confidence: ent.confidence ?? 1.0,
-          isUncertain: !((ent as any).is_manual) && (ent.confidence !== undefined && ent.confidence < 0.94)
+          isUncertain: ent.tier ? ent.tier === 'uncertain' : (!ent.is_manual && (ent.confidence !== undefined && ent.confidence < 0.85))
         });
       } else {
         const existing = map.get(key)!;
@@ -411,23 +417,58 @@ export const SideBySideReview: React.FC<SideBySideReviewProps> = ({
 
       {/* Floating / Active Selection Banner for Manual Highlighting */}
       {selectedText && (
-        <div className="bg-indigo-600 text-white rounded-xl px-4 py-3 flex items-center justify-between shadow-md animate-in fade-in slide-in-from-top-2 duration-150">
-          <div className="flex items-center space-x-2 text-xs truncate mr-4">
+        <div className="bg-indigo-600 text-white rounded-xl px-4 py-3 flex flex-wrap items-center justify-between gap-3 shadow-md animate-in fade-in slide-in-from-top-2 duration-150">
+          <div className="flex items-center space-x-2 text-xs truncate max-w-sm">
             <span className="font-semibold uppercase tracking-wider text-[10px] bg-white/20 px-2 py-0.5 rounded">
               Selected Text
             </span>
-            <span className="font-mono bg-indigo-700/80 px-2 py-0.5 rounded max-w-xs truncate">
+            <span className="font-mono bg-indigo-700/80 px-2 py-0.5 rounded truncate">
               &quot;{selectedText}&quot;
             </span>
           </div>
 
-          <button
-            onClick={handleManualHighlightClick}
-            className="flex items-center space-x-1.5 bg-white text-indigo-700 hover:bg-indigo-50 text-xs font-bold px-3.5 py-1.5 rounded-lg shadow-sm transition-colors cursor-pointer flex-shrink-0"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            <span>Redact Selection (as XXX/XYZ)</span>
-          </button>
+          <div className="flex items-center space-x-1.5 flex-wrap">
+            <span className="text-[11px] text-indigo-100 font-medium mr-1">Redact as:</span>
+            <button
+              onClick={() => handleManualHighlightClick('PERSON')}
+              className="flex items-center space-x-1 bg-white text-indigo-700 hover:bg-indigo-50 text-xs font-semibold px-2.5 py-1.5 rounded-lg shadow-2xs transition-colors cursor-pointer"
+            >
+              <User className="w-3.5 h-3.5 text-indigo-600" />
+              <span>Person</span>
+            </button>
+            <button
+              onClick={() => handleManualHighlightClick('ORGANISATION')}
+              className="flex items-center space-x-1 bg-white/95 text-indigo-800 hover:bg-white text-xs font-semibold px-2.5 py-1.5 rounded-lg shadow-2xs transition-colors cursor-pointer"
+            >
+              <Building2 className="w-3.5 h-3.5 text-indigo-600" />
+              <span>Organisation</span>
+            </button>
+            <button
+              onClick={() => handleManualHighlightClick('ACCOUNT_NUMBER')}
+              className="flex items-center space-x-1 bg-white/95 text-indigo-800 hover:bg-white text-xs font-semibold px-2.5 py-1.5 rounded-lg shadow-2xs transition-colors cursor-pointer"
+            >
+              <CreditCard className="w-3.5 h-3.5 text-indigo-600" />
+              <span>Account</span>
+            </button>
+            <button
+              onClick={() => handleManualHighlightClick('CUSTOM')}
+              className="flex items-center space-x-1 bg-white/20 text-white hover:bg-white/30 text-xs font-semibold px-2.5 py-1.5 rounded-lg transition-colors cursor-pointer"
+            >
+              <Shield className="w-3.5 h-3.5 text-white" />
+              <span>Custom</span>
+            </button>
+            <button
+              onClick={() => {
+                setSelectedText('');
+                setSelectionContext(null);
+                window.getSelection()?.removeAllRanges();
+              }}
+              className="text-indigo-200 hover:text-white p-1 text-xs font-bold ml-1 cursor-pointer"
+              title="Cancel selection"
+            >
+              ✕
+            </button>
+          </div>
         </div>
       )}
 
@@ -491,6 +532,17 @@ export const SideBySideReview: React.FC<SideBySideReviewProps> = ({
                 placeholder="Type word/phrase to redact..."
                 className="w-full text-xs px-2.5 py-1.5 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 bg-white"
               />
+              <select
+                value={customTermType}
+                onChange={(e) => setCustomTermType(e.target.value)}
+                className="text-xs px-2 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-700 focus:outline-none cursor-pointer flex-shrink-0"
+                title="Select entity type"
+              >
+                <option value="PERSON">Person</option>
+                <option value="ORGANISATION">Org</option>
+                <option value="ACCOUNT_NUMBER">Account</option>
+                <option value="CUSTOM">Custom</option>
+              </select>
               <button
                 type="submit"
                 disabled={!customTerm.trim()}

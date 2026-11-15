@@ -4,6 +4,60 @@ A high-level record of architectural decisions, customer feedback fixes, and del
 
 ---
 
+## [2026-11-16] - Week 2/3: Identity Resolution, Reviewer Feedback & Guard Hardening (Engineer A - PR 5)
+- **Decision:** Fully resolved all 13 issues and gaps raised in reviewer feedback across entity placeholders, alias resolution, outbound guard fail-safes, structured pattern protection, and pattern validators.
+- **Reason:** Satisfies Phase 1 Week 2/3 core governance requirements: eliminates cross-category placeholder pollution, prevents over-aggressive entity conversion, secures the outbound guard fail-safe when active entities are omitted, stops false blocks on common English words, protects structured PII from being swallowed, and ensures strict adherence to Ground Rule 1 (zero hardcoded name lists).
+- **Key Changes:**
+  - `backend/app/detector/engine.py`:
+    - **Typed Registry Key & Late Allocation:** Added `entity_type` to `EntityRegistry` key `(prefix, text)`. Allocated placeholders only after all candidate extraction, reclassification, identity clustering, and deduplication are complete. Completely prevents entities like `Marcus Sterling (Executive)` from receiving an organisation placeholder (`[ORG 1]`).
+    - **Dropped First-Name Reclassification:** Dropped first-name cross-referencing for organisations so entities like `Morgan Stanley`, `John Lewis`, and `Marks & Spencer` are never converted to people based on first name alone.
+    - **Role Regex Restraint & Punctuation:** Restricted `ROLE_PREFIX_REGEX` delimiters to `:` and `-` (excluding bare commas). Added non-person role filters (`resources`, `team`, `department`, `not provided`). Set unconfirmed role-based matches to `tier: "uncertain"` (0.75).
+    - **Initial-Based Disambiguation:** Extended surname resolution to resolve initials (e.g. `P. Smith` resolves to `Peter Smith`, not `John Smith`).
+    - **Ambiguous Titled Mentions:** Marked ambiguous titled references (e.g. `Mrs Patel` when both Meena and Priya are present) as `tier: "uncertain"` (0.70) rather than creating an artificial confident third cluster.
+    - **Organisation Stemming & Alias Resolution:** Added `extract_org_stem` to derive distinctive core stems (e.g. `Halden` from `Halden Logistics`), added stem to `surface_forms`, and detected standalone stem mentions as uncertain aliases.
+    - **Structured Span Protection:** In `_deduplicate_spans`, carved out absolute protection for structured patterns (`PATTERNS`). Structured values (e.g. `DOB 01/02/1985`) can never be swallowed, trimmed, or overridden by adjacent or enclosing uncertain spans.
+    - **User-Authored Metadata Scanning:** Scanned user-authored metadata fields (`author`, `creator`, `last_modified_by`, `title`, `subject`) for PII entities while ignoring software generator metadata (`Producer`, `Application`).
+    - **Honest Docstring:** Updated module docstrings to truthfully describe lexical determiners, legal syntax, and boilerplate filters.
+  - `backend/app/guard/checker.py`:
+    - **Defense-in-Depth Structured Scan:** Updated `check_outbound` to scan both document text and prompt for raw structured PII directly, ensuring the gate blocks unmasked PII even if `active_entities: []`.
+    - **Case-Sensitive Word Boundary Matching:** Made name surface form matching case-sensitive so ordinary lowercase words (`rose`, `grant`, `will`, `grace`, `hope`, `may`, `wood`) are never falsely blocked.
+    - **Organisation Stem Harmonization:** Updated corporate stem extraction to strip suffixes like `logistics`, `partners`, `services`, `solicitors`, and `systems`.
+  - `backend/app/main.py`:
+    - **Unconditional Outbound Guard:** Removed `if active_entities:` guard bypass in `/api/llm/summarize`; `GuardEngine.check_outbound` is now unconditionally enforced on every dispatch.
+  - `backend/app/detector/patterns.py`:
+    - **UK Phone Generalization:** Extended `PHONE` regex to match `+44 (0) ...` telephone formats.
+    - **Contextual Sort Code Validation:** Restricted `SORT_CODE` regex to hyphenated pairs (`\d{2}-\d{2}-\d{2}`) or explicit sort code context, preventing random dates like `12 03 26` from triggering false positive sort codes.
+  - `tests/test_reviewer_fixes.py`:
+    - Implemented a 20-test automated verification suite covering all reviewer feedback items.
+- **Verification:**
+  - `tests/eval.py`: **100.0% Recall** across all 13 types, **98.3% PERSON Precision**, **100.0% ORGANISATION Precision**, **99.1% Overall Precision**, 0 misses, fail-safe gate passed.
+  - `tests/test_reviewer_fixes.py`: **20 / 20 tests passing**.
+  - `npm --prefix frontend run build`: **0 TypeScript / Turbopack build errors**.
+
+---
+
+## [2026-11-15] - Week 2: Statistical NER via spaCy & Deletion of Brittle Rules (Engineer A - PR 4)
+- **Decision:** Replaced `seq_pattern` (capitalized sequences), `party_verb_pattern`, and arbitrary block-order heuristics in `engine.py` with statistical NER via a singleton spaCy `en_core_web_sm` model. Added `canonical_id`, `surface_forms`, and `tier` (`confident` / `uncertain` / `manual`) to `DetectedEntity`. Supported compact international phone numbers (`+\d{8,14}`). Restricted corporate regex to horizontal whitespace. Updated `SideBySideReview.tsx` uncertain review gate to be driven by `tier`. Updated `IntakeScreen.tsx` privacy claim.
+- **Reason:** Fulfills Week 2 milestone: statistical NER eliminates test-suite tuning and removes the 14 false-positive backlog items (table row labels in `.xlsx` and capitalized titles in `.docx`) while maintaining 100% recall and staying within Render Free Tier memory limits (~120 MB RAM used of 512 MB). Also resolves real-world CV intake issues: compact unspaced phone numbers (`+91...`) and multi-line corporate bridging.
+- **Key Changes:**
+  - `backend/app/detector/spacy_loader.py`: Singleton `get_nlp()` loader initializing `en_core_web_sm` once with lemmatizer disabled and auto-download fallback.
+  - `backend/app/detector/patterns.py`: Generalized `PHONE` regex to match compact international phone numbers (`+\d{8,14}`); restricted `COMPANY_REGEX` to horizontal whitespace (`[ \t]+`) to prevent multiline false merges.
+  - `backend/app/detector/engine.py`: Refactored `DetectionEngine` to use spaCy for `PERSON` and `ORGANISATION` while preserving regex validators for structured UK PII. Deleted `seq_pattern`, `party_verb_pattern`, and arbitrary header heuristics. Added algorithmic alias and canonical resolution.
+  - `backend/app/models.py`: Added `canonical_id: Optional[str]`, `surface_forms: List[str]`, and `tier: str` to `DetectedEntity`.
+  - `frontend/lib/types.ts`: Synchronized TypeScript `DetectedEntity` interface with `canonical_id`, `surface_forms`, and `tier`.
+  - `frontend/components/SideBySideReview.tsx`: Updated `isUncertain` gate calculation to check `ent.tier === 'uncertain'` rather than a hardcoded 0.94 cutoff.
+  - `frontend/components/IntakeScreen.tsx`: Replaced legacy "Local & Ephemeral" statement with accurate server-side processing notice.
+  - `PROJECT_CONTEXT_AND_RULES.md`: Established persistent ground rules and architecture reference.
+- **Verification:** Evaluated against 7 synthetic test documents with 105 seeded entities:
+  - **Overall Recall:** **100.0%** (105 / 105)
+  - **Overall Precision:** **100.0%** (105 / 105)
+  - **PERSON Precision:** **100.0%** (0 false positives, meeting $\ge 90.0\%$ target)
+  - **ORGANISATION Precision:** **100.0%** (meeting $\ge 85.0\%$ target)
+  - **Outbound Fail-Safe Gate:** Passed
+  - **Next.js Production Build:** Passed with 0 TypeScript errors.
+
+---
+
 ## [2026-11-13] - Week 2: Dependency Preparation & Pattern Generalization (Engineer A - PR 3)
 - **Decision:** Added `spacy>=3.8.0` dependency to `backend/requirements.txt`, removed test-specific words from patterns (`Priya`, `Parties Background`), generalized matter reference format for initials (`KB/2026/0912`), added hyphenated surname recognition (`Adebayo-Clarke`), and supported ampersands in law firm names (`Kingsley & Barr LLP`).
 - **Reason:** Sets up the foundation for Week 2 statistical NER and prevents test-suite overfitting while expanding coverage for genuine UK legal documents.

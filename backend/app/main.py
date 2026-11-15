@@ -96,23 +96,22 @@ async def summarize(request: SummarizeRequest):
     # 1. Use typed active_entities from request
     active_entities: List[DetectedEntity] = request.active_entities
 
-    # 2. Server-side Outbound Guard: check all surface forms & aliases against document and prompt
-    if active_entities:
-        outbound_res = GuardEngine.check_outbound(OutboundCheckRequest(
-            doc_id="server_check",
-            protected_text=request.protected_text,
-            active_entities=active_entities,
-            user_prompt=request.instructions or ""
-        ))
-        if not outbound_res.passed:
-            leaks = outbound_res.leaked_items + outbound_res.prompt_leaks
-            return SummarizeResponse(
-                success=False,
-                summary="",
-                provider=request.provider,
-                model=request.model or "unknown",
-                error=f"Security gate blocked dispatch: {outbound_res.explanation} Details: {', '.join(leaks[:4])}"
-            )
+    # 2. Server-side Outbound Guard: always verify document and prompt (even if active_entities is empty)
+    outbound_res = GuardEngine.check_outbound(OutboundCheckRequest(
+        doc_id="server_check",
+        protected_text=request.protected_text,
+        active_entities=active_entities or [],
+        user_prompt=request.instructions or ""
+    ))
+    if not outbound_res.passed:
+        leaks = outbound_res.leaked_items + outbound_res.prompt_leaks
+        return SummarizeResponse(
+            success=False,
+            summary="",
+            provider=request.provider,
+            model=request.model or "unknown",
+            error=f"Security gate blocked dispatch: {outbound_res.explanation} Details: {', '.join(leaks[:4])}"
+        )
 
     # 3. Defense-in-depth prompt screening: screen lawyer instructions for unmasked sensitive items
     if request.instructions and request.instructions.strip():

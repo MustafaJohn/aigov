@@ -167,12 +167,12 @@ export default function Home() {
   };
 
   // Manual Highlighting (Text selection or custom term input)
-  const handleAddManualEntity = (term: string, targetBlockId?: string) => {
+  const handleAddManualEntity = (term: string, targetBlockId?: string, entityType: string = 'PERSON') => {
     if (!docIR || !term.trim()) return;
 
     const cleanTerm = term.trim();
     const newEntities: DetectedEntity[] = [];
-    const nextPlaceholder = generateTypedPlaceholder('CUSTOM', entities);
+    const nextPlaceholder = generateTypedPlaceholder(entityType, entities);
 
     const blocksToSearch = targetBlockId
       ? docIR.blocks.filter((b) => b.id === targetBlockId)
@@ -197,11 +197,13 @@ export default function Home() {
             start: startIdx,
             end: endIdx,
             text: matchedSubstring,
-            type: 'MANUAL',
+            type: entityType,
             placeholder: nextPlaceholder,
             confidence: 1.0,
             is_active: true,
             is_manual: true,
+            tier: 'manual',
+            surface_forms: [matchedSubstring],
           });
         }
 

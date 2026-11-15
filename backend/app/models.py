@@ -55,6 +55,9 @@ class DetectedEntity(BaseModel):
     placeholder: str
     confidence: float = 1.0
     is_active: bool = True  # Lawyer can toggle inclusion
+    canonical_id: Optional[str] = None
+    surface_forms: List[str] = Field(default_factory=list)
+    tier: str = "confident"  # confident, uncertain, manual
 
 class DetectionResult(BaseModel):
     doc_id: str

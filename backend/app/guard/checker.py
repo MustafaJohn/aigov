@@ -21,6 +21,11 @@ class GuardEngine:
             return forms
 
         forms.add(raw)
+        if entity.surface_forms:
+            for s in entity.surface_forms:
+                if s and s.strip():
+                    forms.add(s.strip())
+
         ent_type = entity.type.upper()
 
         if ent_type == "PERSON":
@@ -42,19 +47,30 @@ class GuardEngine:
                     for title in ("Mr", "Mr.", "Mrs", "Mrs.", "Ms", "Ms.", "Dr", "Dr."):
                         forms.add(f"{title} {surname}")
 
+                    # First name alone if substantive (Issue 8)
+                    if len(firstname) >= 3:
+                        forms.add(firstname)
+
                     # Initial + surname
                     if firstname:
                         forms.add(f"{firstname[0]}. {surname}")
+                        forms.add(f"{firstname[0]}.{surname}")
                         forms.add(f"{firstname[0]} {surname}")
+
+                    # If multi-token with middle name (e.g. Amaan Ahmad Siddiqui), add First + Surname and multi-initial
+                    if len(words) >= 3:
+                        forms.add(f"{firstname} {surname}")
+                        forms.add(f"{words[0][0]}. {words[1][0]}. {surname}")
+                        forms.add(f"{words[0][0]}.{words[1][0]}. {surname}")
 
             elif len(words) == 1:
                 if len(words[0]) >= 3:
                     forms.add(words[0])
 
         elif ent_type in ("ORGANISATION", "ORGANIZATION"):
-            # Generic statutory corporate suffix stripping
+            # Generic statutory corporate suffix stripping (including logistics, partners, services, etc.)
             stem = re.sub(
-                r"(?i)\b(?:ltd|limited|llp|plc|inc|corp|corporation|holdings|group|chambers)\b\.?$",
+                r"(?i)\b(?:ltd|limited|llp|plc|inc|corp|corporation|holdings|group|chambers|logistics|partners|services|solicitors|bank|school|academy|college|hospital|clinic|systems)\b\.?$",
                 "",
                 raw
             ).strip()
@@ -70,17 +86,22 @@ class GuardEngine:
         return forms
 
     @staticmethod
-    def _matches_in_text(text: str, surface_form: str) -> bool:
+    def _matches_in_text(text: str, surface_form: str, is_person_entity: bool = False) -> bool:
         """
         Checks if a surface form appears in text on word boundaries.
-        Prevents false positive substring matches (e.g. 'Vance' inside 'Advance').
+        Case-sensitive for personal names and word-like surface forms to prevent
+        blocking ordinary lowercase English words like 'rose', 'grant', 'will', 'grace', 'hope'.
         """
         clean_form = surface_form.strip()
         if len(clean_form) < 3:
             return False
 
-        # Escape form and enforce word boundaries
-        pattern = re.compile(rf"(?<!\w){re.escape(clean_form)}(?!\w)", re.IGNORECASE)
+        # If it's a person entity or single title-cased word, enforce case-sensitivity
+        is_title_cased = clean_form[0].isupper() and clean_form.isalpha()
+        case_sensitive = is_person_entity or (is_title_cased and len(clean_form.split()) == 1)
+
+        flags = 0 if case_sensitive else re.IGNORECASE
+        pattern = re.compile(rf"(?<!\w){re.escape(clean_form)}(?!\w)", flags)
         return bool(pattern.search(text))
 
     @classmethod
@@ -95,22 +116,29 @@ class GuardEngine:
         sanitized_doc = re.sub(r"\[[A-Z_\s0-9]+\]", " ", doc_text)
         sanitized_prompt = re.sub(r"\[[A-Z_\s0-9]+\]", " ", prompt_text)
 
+        # 1. Check active entities and their surface forms
         for ent in request.active_entities:
+            is_person = (ent.type.upper() == "PERSON")
             surface_forms = cls.get_surface_forms(ent)
 
             for form in surface_forms:
-                if cls._matches_in_text(sanitized_doc, form):
+                if cls._matches_in_text(sanitized_doc, form, is_person_entity=is_person):
                     leaked_in_doc.append(f"{ent.type}: '{form}' (alias of '{ent.text}')")
 
-                if cls._matches_in_text(sanitized_prompt, form):
+                if cls._matches_in_text(sanitized_prompt, form, is_person_entity=is_person):
                     leaked_in_prompt.append(f"{ent.type} in prompt: '{form}' (alias of '{ent.text}')")
 
-        # Also check if the prompt contains raw structured PII directly (e.g. NI numbers, sort codes)
+        # 2. Defense-in-depth: check document and prompt for raw structured PII directly
+        # Ensures that if active_entities is empty, raw unmasked PII is still blocked!
         for p_name, p_info in PATTERNS.items():
-            if p_name in ("NI_NUMBER", "SORT_CODE", "EMAIL", "PHONE", "ACCOUNT_NUMBER"):
+            if p_name in ("NI_NUMBER", "SORT_CODE", "EMAIL", "PHONE", "ACCOUNT_NUMBER", "CREDIT_CARD", "DRIVING_LICENCE", "PASSPORT"):
                 regex = p_info["regex"]
+                for m in regex.finditer(sanitized_doc):
+                    val = m.group(1) if m.groups() and m.group(1) else m.group()
+                    leaked_in_doc.append(f"Document contains unmasked {p_info['label']}: '{val}'")
                 for m in regex.finditer(sanitized_prompt):
-                    leaked_in_prompt.append(f"Prompt contains raw {p_info['label']}: '{m.group()}'")
+                    val = m.group(1) if m.groups() and m.group(1) else m.group()
+                    leaked_in_prompt.append(f"Prompt contains unmasked {p_info['label']}: '{val}'")
 
         passed = len(leaked_in_doc) == 0 and len(leaked_in_prompt) == 0
 
