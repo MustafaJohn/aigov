@@ -55,10 +55,13 @@ export interface DetectedEntity {
   end: number;
   text: string;
   type: string;
-  placeholder: string; // e.g. "XXX_1", "XYZ_2"
+  placeholder: string; // e.g. "[PERSON 1]", "[ORG 2]"
   confidence: number;
   is_active: boolean;
   is_manual?: boolean;
+  canonical_id?: string | null;
+  surface_forms?: string[];
+  tier?: 'confident' | 'uncertain' | 'manual';
 }
 
 export interface DetectionResult {

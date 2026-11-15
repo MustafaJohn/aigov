@@ -9,7 +9,8 @@ PATTERNS = {
         "placeholder_type": "NI NUMBER"
     },
     "SORT_CODE": {
-        "regex": re.compile(r"\b(?:\d{2}-\d{2}-\d{2}|\d{2}\s\d{2}\s\d{2})\b"),
+        # UK Sort Code: hyphenated pairs (e.g. 20-45-12) or explicit sort code context (avoids misclassifying dates like 12 03 26)
+        "regex": re.compile(r"(?i:\b(?:sort\s+code|s\/c)\s*[:\-–]?\s*)(\d{2}[-\s]\d{2}[-\s]\d{2})\b|\b(\d{2}-\d{2}-\d{2})\b"),
         "label": "Sort Code",
         "placeholder_type": "SORT CODE"
     },
@@ -42,7 +43,7 @@ PATTERNS = {
         "placeholder_type": "EMAIL"
     },
     "PHONE": {
-        "regex": re.compile(r"(?<!\w)(?:(?:\+44\s?|0)(?:20\s?\d{4}|1\d{3}\s?\d{3}|7\d{3}\s?\d{3})\s?\d{3,4}|\+?[0-9]{1,3}[-.\s]\(?\d{2,4}\)?[-.\s]\d{3}[-.\s]\d{3,4})\b"),
+        "regex": re.compile(r"(?<!\w)(?:(?:\+44\s?(?:\(0\)\s?)?|0)(?:20\s?\d{4}|1\d{3}\s?\d{3}|7\d{3}\s?\d{3})\s?\d{3,4}|\+[1-9]\d{7,14}|\+?[0-9]{1,3}[-.\s]\(?\d{2,4}\)?[-.\s]\d{3}[-.\s]\d{3,4})\b"),
         "label": "Phone Number",
         "placeholder_type": "PHONE"
     },
@@ -114,7 +115,7 @@ NAME_STOPWORDS = {
 # 4. Company & Organisation Detection (Including firms with &, schools, care homes, clinics, councils, agencies)
 # Exclude "National Insurance" from being matched as a company
 COMPANY_REGEX = re.compile(
-    r"\b(?!(?:UK\s+)?National\s+Insurance)(?:(?:[A-Z][A-Za-z0-9'.-]+|&)\s+){1,4}(?:LLP|Ltd\.?|Limited|PLC|LLC|Inc\.?|Corp\.?|Corporation|Holdings|Partners|Chambers|Solicitors|Law\s+Firm|Assurance|Insurance|Group|School|Primary\s+School|Secondary\s+School|Academy|College|University|Hospital|Clinic|Care\s+Home|Council|Association|Agency|Trust|Foundation|Centre|Center)\b"
+    r"\b(?!(?:UK\s+)?National\s+Insurance)(?:(?:[A-Z][A-Za-z0-9'.-]+|&)[ \t]+){1,4}(?:LLP|Ltd\.?|Limited|PLC|LLC|Inc\.?|Corp\.?|Corporation|Holdings|Partners|Chambers|Solicitors|Law\s+Firm|Assurance|Insurance|Group|School|Primary\s+School|Secondary\s+School|Academy|College|University|Hospital|Clinic|Care\s+Home|Council|Association|Agency|Trust|Foundation|Centre|Center|Factory|Systems)\b"
 )
 
 # 5. Major Financial Institutions & Banks
