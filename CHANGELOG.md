@@ -4,14 +4,35 @@ A high-level record of architectural decisions, customer feedback fixes, and del
 
 ---
 
-## [2026-11-17] - Deployment: spaCy model pinned at build time (Engineer B)
+## [2026-11-17] - Week 3: PDF hidden content, local OCR with a confidence gate, Docker deploy, audit-record proposal (Rishi)
+- **Decision:** The PDF parser now surfaces everything in a PDF that is not body text, and scanned pages are read locally with Tesseract instead of being passed through unread. A scanned page that cannot be read, is read below the minimum confidence, or falls beyond the OCR page limit now **blocks** the document. The backend deploys from a Dockerfile so Render can install Tesseract.
+- **Reason:** Before this change a scanned letter came back with no text at all and the gate still said `READY_WITH_WARNINGS`, so a scan could reach the AI step with nothing on it screened. Dropdown options, link targets, attachments and bookmarks were never read, and an unapplied redaction mark was reported only as its note, not as text still sitting in the file.
+- **Key Changes:**
+  - `backend/app/parser/pdf_parser.py`: rewritten. New block types `ocr_text`, `scan_unread`, `form_options`, `hyperlink`, `redaction_mark`, `attachment`, `bookmark`, `metadata`, plus the existing `paragraph`, `form_field`, `annotation`. Annotations of every subtype with their author; FreeText and Stamp count as on the page, the rest as hidden. Unapplied `/Redact` marks report the text still underneath. All form field types (text, checkbox, dropdown) and every dropdown option. Embedded files listed; small text attachments read and screened, others named in a warning. Bookmarks, Info and XMP properties as blocks. Password-protected PDFs blocked with a plain reason. Amaan's layout-mode text extraction kept.
+  - `backend/app/parser/ocr.py` (new): pages rendered with pypdfium2 (no Poppler needed) and read with Tesseract one page at a time. Per-page confidence = word confidences weighted by word length. Settings by environment variable: `OCR_ENABLED` (true), `OCR_MAX_PAGES` (20), `OCR_DPI` (300), `OCR_WARN_CONFIDENCE` (0.80), `OCR_BLOCK_CONFIDENCE` (0.60), `OCR_PAGE_TIMEOUT` (60 s). Tesseract pinned to one thread (`OMP_THREAD_LIMIT=1`): measured 3x faster per page and steadier on a fractional CPU.
+  - `backend/app/parser/intake.py`: any block carrying `locator["gate_block_reason"]` makes the document `BLOCKED`, with the reason(s) shown to the lawyer. Parsers can now stop a document without each one re-implementing the gate.
+  - `backend/Dockerfile`, `backend/.dockerignore` (new): `python:3.12-slim` plus `tesseract-ocr`; uvicorn on Render's `$PORT`. `requirements.txt` adds `pytesseract`, `pypdfium2`, `Pillow`.
+  - `DEVELOPER_GUIDE.md`: parser section rewritten (it still said intake "immediately issues READY"), local Tesseract install steps, and Render Docker deployment steps with the memory figures.
+  - `docs/proposals/audit-event.md` (new): proposed `AuditEvent` record for deliverable 10: metadata only, hash-chained per matter, file names never stored, with three questions for Amaan.
+  - `tests/synthetic/pdf_depth/` (new): generator plus four PDFs: a text-layer witness statement seeding 13 off-page items, and clear, poor and unreadable scans. `tests/eval_ingestion.py` now also checks gate status, gate reasons and warnings, and two configuration cases (OCR page limit, OCR switched off), both of which must block.
+- **Measurements (development machine, 17 Nov):**
+  - Clean 300 dpi scan: OCR confidence 0.94 to 0.95, all seeded items read, about 0.5 to 0.8 s per page single-threaded.
+  - Memory: API process with spaCy peaks at about 306 MB during a 2-page OCR job; Tesseract adds about 65 MB per page at 300 dpi; about 370 MB worst case against Render free's 512 MB. Render's CPU is much slower than a laptop, so time a real upload there before trusting the 20-page limit.
+  - **Thresholds need a second look.** On degraded scans, pages at 79% and 63% confidence (both "warn but allow" under the agreed 0.80 / 0.60) produced misreads that let a client surname and parts of identifiers through the detector; a 67% page leaked nothing and a 45% page blocked correctly. Small sample, but it says the warn band is not safe by itself. Recommendation for the team: raise `OCR_BLOCK_CONFIDENCE` to about 0.75, or make every OCR page in the warn band an uncertain item the lawyer must confirm. Defaults left at the agreed values pending that decision.
+  - Detector gap found while testing (Amaan's lane): the reference `TF-2026-0417` is missed even on a perfect scan and in plain text.
+- **Verification:** `tests/eval_ingestion.py` 55/55; `tests/eval.py` 105/105 recall, 96.3% PERSON precision; both re-run in a clean Python 3.12 environment with the versions a fresh install resolves (pypdf 7.1, spaCy 3.8.18); uploads checked end to end through the running API (clear scan screened, unreadable scan blocked, witness statement 26 entities).
+- **Not done (needs other people):** Vanshika's real DOCX, XLSX and PDF test documents have not arrived; they go through `eval_ingestion.py` when they do. The Dockerfile was not built here (no Docker daemon in this environment); the first Render deploy is its build test.
+
+---
+
+## [2026-11-17] - Deployment: spaCy model pinned at build time (Rishi)
 - **Decision:** `en_core_web_sm` 3.8.0 is pinned in `backend/requirements.txt` as a direct wheel URL so Render installs it during the build.
 - **Reason:** `spacy_loader.get_nlp()` falls back to `spacy.cli.download()` at runtime, which on the free tier means a network download on the first upload after every cold start, and a failed request if the instance cannot reach GitHub at that moment. The fallback stays as a safety net; it should no longer be hit.
 - **Verification:** model loads at import; `tests/eval.py` 105/105 recall, 96.3% precision; `tests/eval_ingestion.py` 25/25.
 
 ---
 
-## [2026-11-11] - Week 2 (part 2): XLSX hidden-content ingestion (Engineer B)
+## [2026-11-11] - Week 2 (part 2): XLSX hidden-content ingestion (Rishi)
 - **Decision:** The XLSX parser now loads each workbook twice (cached values and formulas) and surfaces everything in the file that is not on screen: hidden rows and columns, cell comments, formula text, hyperlinks, sheet headers and footers, dropdown (data-validation) lists, defined-name constants and all workbook properties. Hidden and very-hidden sheets were already covered.
 - **Reason:** With `data_only=True` alone, any formula cell whose result was never calculated by Excel (script-generated files, some export tools) came back as `None` and vanished without a warning. Values in hidden rows and hidden columns were reported as visible. Comments, mailto links, headers/footers, dropdown options and defined names were never read, and properties were captured but never detected on.
 - **Key Changes:**
@@ -23,7 +44,7 @@ A high-level record of architectural decisions, customer feedback fixes, and del
 
 ---
 
-## [2026-11-07] - Week 2 (part 1): DOCX hidden-content ingestion (Engineer B)
+## [2026-11-07] - Week 2 (part 1): DOCX hidden-content ingestion (Rishi)
 - **Decision:** The DOCX parser now walks the WordprocessingML XML directly instead of relying on `python-docx` paragraph text, so every place a name can hide in a Word file reaches the detector.
 - **Reason:** `paragraph.text` only reads runs that are direct children of the paragraph. Text inside a tracked insertion (`w:ins`) and deleted text (`w:delText`) were silently dropped, hidden-formatted runs (`w:vanish`) were merged into visible text with no flag, and comments, footnotes, headers, footers, text boxes and custom properties were never read at all. Document properties were captured as metadata but never turned into blocks, so author names never went through detection.
 - **Key Changes:**
@@ -126,7 +147,7 @@ A high-level record of architectural decisions, customer feedback fixes, and del
 
 ---
 
-## [2026-11-05] - Week 1 Hygiene: Fail-Safe Gate Enforcement, CORS, Error Handling & Model Defaults (Engineer B)
+## [2026-11-05] - Week 1 Hygiene: Fail-Safe Gate Enforcement, CORS, Error Handling & Model Defaults (Rishi)
 - **Decision:** Closed the week-1 hygiene items from the Phase 1 plan: the fail-safe gate is now enforced end to end, the API only answers the frontend origin, no exception text or provider error body reaches the browser, and the three provider defaults point at models that still exist.
 - **Reason:** `GateBanner` was imported but never rendered, so intake warnings and blocks were invisible and the AI view was reachable from the sidebar regardless of document state. CORS was `*` with credentials. Intake and provider errors echoed internals (including, in OpenAI's case, the API key). All three default model IDs were retired or scheduled for shutdown.
 - **Key Changes:**

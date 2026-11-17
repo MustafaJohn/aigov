@@ -155,9 +155,17 @@ LegalTech/
   - **NI Numbers, Sort Codes, Phones, Emails, Monetary Amounts, Matter Refs, Dates of Birth.**
 - Replaces entities with consistent random jargon tokens (`XXX_1`, `XYZ_2`, `XXX_3`, etc.) rather than `[REDACTED]`.
 
-### 2. `backend/app/parser/intake.py`
-- Coordinates parsing for `.docx`, `.xlsx`, `.pdf`, and `.txt`.
-- Immediately issues `status = "READY"` when text is extracted, eliminating annoying warning barriers.
+### 2. `backend/app/parser/` (intake and the fail-safe gate)
+- `intake.py` routes `.docx`, `.xlsx`, `.pdf` and `.txt` to their parsers and sets the gate status:
+  - `BLOCKED` for unsupported, empty or oversized files, unreadable files, documents with no text, and any block a parser marks with `locator["gate_block_reason"]` (unread scanned pages, OCR below the minimum confidence, pages over the OCR limit, password-protected PDFs).
+  - `READY_WITH_WARNINGS` whenever anything off-page was found (comments, tracked changes, hidden rows, annotations, attachments, OCR'd pages and so on). The lawyer must acknowledge these before AI dispatch.
+  - `READY` only when the file is plain visible text.
+- Every parser surfaces content that is in the file but not on the page, as its own block. `Block.visibility` is always `visible`, `hidden` or `metadata`; `Block.type` names the kind and shows as a badge on the review screen.
+  - `docx_parser.py`: walks the Word XML directly; tracked insertions and deletions, hidden text, comments, headers and footers, footnotes and endnotes, text boxes, core and custom properties.
+  - `xlsx_parser.py`: loads the workbook twice (values and formulas); hidden sheets, rows and columns, cell comments, formula text, hyperlinks, headers and footers, dropdown lists, defined names, properties.
+  - `pdf_parser.py`: layout-aware text, annotations of every kind, unapplied redaction marks (with the text still underneath), form fields and dropdown options, attachments, bookmarks, Info and XMP properties.
+  - `ocr.py`: scanned PDF pages rendered with pypdfium2 and read with Tesseract, locally. Per-page confidence; below `OCR_WARN_CONFIDENCE` (0.80) the document gets a warning, below `OCR_BLOCK_CONFIDENCE` (0.60) it is blocked. At most `OCR_MAX_PAGES` (20) pages are read per document; any scanned page beyond that blocks the document.
+- Tests: `tests/eval_ingestion.py` checks every seeded off-page item in `tests/synthetic/**/*.expected.json` and the OCR gate cases. Run it alongside `tests/eval.py` before every merge.
 
 ### 3. `backend/app/llm/client.py`
 - Multi-provider client supporting OpenAI, Anthropic Claude, Google Gemini, and a built-in instant local Demo simulator.
@@ -172,6 +180,12 @@ LegalTech/
 cd backend
 .\venv\Scripts\uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 ```
+OCR needs the Tesseract program on your machine (everything else installs from `requirements.txt`):
+- macOS: `brew install tesseract`
+- Windows: install from https://github.com/UB-Mannheim/tesseract/wiki and add it to `PATH`
+- Ubuntu/Debian: `sudo apt-get install tesseract-ocr`
+
+Without it the app still runs, but any scanned PDF is blocked with "OCR is not installed on this server".
 
 ### 2. Frontend:
 ```powershell
@@ -179,3 +193,15 @@ cd frontend
 npm run dev
 ```
 Open your browser at `http://localhost:3000`.
+
+---
+
+## ☁️ Deploying the backend on Render (free tier)
+
+The backend deploys from `backend/Dockerfile`, because Render's native Python runtime cannot install the Tesseract program that OCR needs.
+
+1. In the Render dashboard, open the backend service → **Settings**. Set **Runtime** to **Docker**, **Root Directory** to `backend`, and **Dockerfile Path** to `./Dockerfile`. Clear any custom build and start commands; the Dockerfile has both.
+2. Under **Environment**, keep `ALLOWED_ORIGINS=https://aigov-frontend.onrender.com`. Optional: `OCR_MAX_PAGES`, `OCR_WARN_CONFIDENCE`, `OCR_BLOCK_CONFIDENCE`, `OCR_DPI`, `OCR_ENABLED`.
+3. Deploy. The spaCy model is installed at build time from `requirements.txt`; nothing is downloaded at runtime.
+
+Measured on 17 Nov 2026 (development machine, not Render): API process with spaCy loaded peaks at about 306 MB during a 2-page OCR job, and Tesseract adds about 65 MB per page at 300 dpi, so roughly 370 MB against Render free's 512 MB. A clean page took about 0.5 s with one Tesseract thread. Render's free instance has far less CPU than a laptop, so time a real scanned upload there before relying on the 20-page limit; lower `OCR_MAX_PAGES` if requests time out.

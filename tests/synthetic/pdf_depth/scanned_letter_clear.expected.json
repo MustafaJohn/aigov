@@ -1,0 +1,14 @@
+{
+  "document": "scanned_letter_clear.pdf",
+  "expected_status": "READY_WITH_WARNINGS",
+  "note": "Synthetic. Image-only 2-page letter; OCR must read the seeded items into ocr_text blocks.",
+  "seeded": [
+    {"text": "Marcus Thornfield", "type": "ocr_text", "what": "client name on a scanned page"},
+    {"text": "Larkspur Close", "type": "ocr_text", "what": "street on a scanned page"},
+    {"text": "WA14 2QL", "type": "ocr_text", "what": "postcode on a scanned page"},
+    {"text": "PX 44 19 02 C", "type": "ocr_text", "what": "NI number on a scanned page"},
+    {"text": "KB/2026/0912", "type": "ocr_text", "what": "opponent's reference on a scanned page"},
+    {"text": "Dean Hollis", "type": "ocr_text", "what": "name on scanned page 2"},
+    {"text": "dean.hollis@example.com", "type": "ocr_text", "what": "email on scanned page 2"}
+  ]
+}

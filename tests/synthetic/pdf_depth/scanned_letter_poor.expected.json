@@ -1,0 +1,10 @@
+{
+  "document": "scanned_letter_poor.pdf",
+  "expected_status": "READY_WITH_WARNINGS",
+  "expected_warning_contains": "OCR confidence is low",
+  "note": "Synthetic. Degraded scan with OCR confidence in the warn band. Only items that a 63% read reliably recovers are listed; the rest are the reason the warning exists.",
+  "seeded": [
+    {"text": "Thornfield", "type": "ocr_text", "what": "surname on a poor scan"},
+    {"text": "WA14 2QL", "type": "ocr_text", "what": "postcode on a poor scan"}
+  ]
+}

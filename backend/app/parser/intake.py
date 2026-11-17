@@ -93,11 +93,23 @@ def intake_file(filename: str, content: bytes) -> DocumentIR:
             )
         )
 
-    # Determine Gate Outcome: Ready, Ready with warnings, or Blocked
+    # Determine Gate Outcome: Ready, Ready with warnings, or Blocked.
+    # A parser marks content that must stop the document (unread scans, OCR below the minimum
+    # confidence, password protection) with locator["gate_block_reason"].
+    block_reasons: List[str] = []
+    for b in blocks:
+        r = b.locator.get("gate_block_reason") if b.locator else None
+        if r and r not in block_reasons:
+            block_reasons.append(r)
+
     if len(blocks) == 0:
         status = "BLOCKED"
         gate_reason = "No extractable text or structure found in document."
         summary = "File contained zero readable text blocks."
+    elif block_reasons:
+        status = "BLOCKED"
+        gate_reason = " ".join(block_reasons[:5]) + (f" (and {len(block_reasons) - 5} more)" if len(block_reasons) > 5 else "")
+        summary = f"Document blocked: {len(block_reasons)} part(s) could not be screened safely."
     elif len(warnings) > 0:
         status = "READY_WITH_WARNINGS"
         gate_reason = None
