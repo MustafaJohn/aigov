@@ -1,0 +1,19 @@
+{
+  "document": "hidden_content_attendance_note.docx",
+  "note": "Synthetic. Every item below is hidden from the page in some way and must appear in the IR with the given block type.",
+  "seeded": [
+    {"text": "Imogen Thornfield", "type": "tracked_insertion", "what": "name added with Track Changes"},
+    {"text": "PX 44 19 02 C", "type": "tracked_deletion", "what": "NI number in deleted text"},
+    {"text": "07911 123456", "type": "hidden_text", "what": "mobile in a hidden-formatted run"},
+    {"text": "Priya Castellane", "type": "comment", "what": "name in a review comment"},
+    {"text": "71002934", "type": "comment", "what": "account number in a review comment"},
+    {"text": "Beatrix Lund", "type": "footnote", "what": "name in a footnote"},
+    {"text": "541203987", "type": "footnote", "what": "passport number in a footnote"},
+    {"text": "TF-2026-0417", "type": "header_footer", "what": "matter reference in the header"},
+    {"text": "0161 496 0712", "type": "header_footer", "what": "phone in the footer"},
+    {"text": "Anneliese Vogt", "type": "textbox", "what": "name inside a text box"},
+    {"text": "marcus.thornfield@example.com", "type": "metadata", "what": "email in a custom document property"},
+    {"text": "Harriet Okonkwo-Bell", "type": "metadata", "what": "author in core properties"},
+    {"text": "Marcus Thornfield", "type": "metadata", "what": "client name in the Comments property"}
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "document": "scanned_letter_unreadable.pdf",
+  "expected_status": "BLOCKED",
+  "expected_gate_contains": "below the 60% minimum",
+  "note": "Synthetic. Scan below the OCR block threshold: the document must be blocked, whatever was recovered.",
+  "seeded": []
+}

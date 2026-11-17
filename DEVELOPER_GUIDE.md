@@ -155,9 +155,17 @@ LegalTech/
   - **NI Numbers, Sort Codes, Phones, Emails, Monetary Amounts, Matter Refs, Dates of Birth.**
 - Replaces entities with consistent random jargon tokens (`XXX_1`, `XYZ_2`, `XXX_3`, etc.) rather than `[REDACTED]`.
 
-### 2. `backend/app/parser/intake.py`
-- Coordinates parsing for `.docx`, `.xlsx`, `.pdf`, and `.txt`.
-- Immediately issues `status = "READY"` when text is extracted, eliminating annoying warning barriers.
+### 2. `backend/app/parser/` (intake and the fail-safe gate)
+- `intake.py` routes `.docx`, `.xlsx`, `.pdf` and `.txt` to their parsers and sets the gate status:
+  - `BLOCKED` for unsupported, empty or oversized files, unreadable files, documents with no text, and any block a parser marks with `locator["gate_block_reason"]` (unread scanned pages, OCR below the minimum confidence, pages over the OCR limit, password-protected PDFs).
+  - `READY_WITH_WARNINGS` whenever anything off-page was found (comments, tracked changes, hidden rows, annotations, attachments, OCR'd pages and so on). The lawyer must acknowledge these before AI dispatch.
+  - `READY` only when the file is plain visible text.
+- Every parser surfaces content that is in the file but not on the page, as its own block. `Block.visibility` is always `visible`, `hidden` or `metadata`; `Block.type` names the kind and shows as a badge on the review screen.
+  - `docx_parser.py`: walks the Word XML directly; tracked insertions and deletions, hidden text, comments, headers and footers, footnotes and endnotes, text boxes, core and custom properties.
+  - `xlsx_parser.py`: loads the workbook twice (values and formulas); hidden sheets, rows and columns, cell comments, formula text, hyperlinks, headers and footers, dropdown lists, defined names, properties.
+  - `pdf_parser.py`: layout-aware text, annotations of every kind, unapplied redaction marks (with the text still underneath), form fields and dropdown options, attachments, bookmarks, Info and XMP properties.
+  - `ocr.py`: scanned PDF pages rendered with pypdfium2 and read with Tesseract, locally. Per-page confidence; below `OCR_WARN_CONFIDENCE` (0.80) the document gets a warning, below `OCR_BLOCK_CONFIDENCE` (0.60) it is blocked. At most `OCR_MAX_PAGES` (20) pages are read per document; any scanned page beyond that blocks the document. Where Tesseract is not installed (the Render free tier) every scanned page blocks the document, with advice to upload a text-based version.
+- Tests: `tests/eval_ingestion.py` checks every seeded off-page item in `tests/synthetic/**/*.expected.json` and the OCR gate cases. Run it alongside `tests/eval.py` before every merge.
 
 ### 3. `backend/app/llm/client.py`
 - Multi-provider client supporting OpenAI, Anthropic Claude, Google Gemini, and a built-in instant local Demo simulator.
@@ -172,6 +180,12 @@ LegalTech/
 cd backend
 .\venv\Scripts\uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 ```
+OCR needs the Tesseract program on your machine (everything else installs from `requirements.txt`):
+- macOS: `brew install tesseract`
+- Windows: install from https://github.com/UB-Mannheim/tesseract/wiki and add it to `PATH`
+- Ubuntu/Debian: `sudo apt-get install tesseract-ocr`
+
+Without it the app still runs, but any scanned PDF is blocked with "OCR is not installed on this server".
 
 ### 2. Frontend:
 ```powershell
@@ -179,3 +193,17 @@ cd frontend
 npm run dev
 ```
 Open your browser at `http://localhost:3000`.
+
+---
+
+## ☁️ Deploying the backend on Render (free tier)
+
+The backend runs on Render's native Python runtime (no Docker, decided 17 Nov 2026).
+
+1. Build command `pip install -r requirements.txt`; start command `uvicorn app.main:app --host 0.0.0.0 --port $PORT`.
+2. Environment: `ALLOWED_ORIGINS=https://aigov-frontend.onrender.com`.
+3. The spaCy model installs at build time from `requirements.txt`; nothing is downloaded at runtime.
+
+**Scanned PDFs on Render.** OCR needs the Tesseract program, which the native Python runtime cannot install, so on Render every scanned page blocks the document with: "Scanned pages … could not be read (OCR is not installed on this server)", plus advice to upload the Word or text-based PDF, or to make the scan searchable on the lawyer's own computer first. This is deliberate: a scan is never passed on unscreened. Text-layer PDFs, Word, Excel and text files are unaffected.
+
+A pip-only OCR engine was tried for the free tier and rejected: RapidOCR peaked at about 850 MB on one page (Render free allows 512 MB), and its confidence scores did not tell a good scan from an unreadable one, so they could not drive the gate. OCR works today wherever Tesseract is installed (developer machines); enabling it in production later needs a host that can install it (a paid plan or a Docker deploy).

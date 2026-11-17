@@ -1,0 +1,18 @@
+{
+  "document": "hidden_content_schedule_of_loss.xlsx",
+  "note": "Synthetic. Every item below is off-screen in some way and must appear in the IR with the given block type.",
+  "seeded": [
+    {"text": "12309876", "type": "hidden_row", "what": "account number in a hidden row"},
+    {"text": "PX 44 19 02 C", "type": "hidden_column", "what": "NI number in a hidden column"},
+    {"text": "07700 900321", "type": "comment", "what": "phone in a cell comment"},
+    {"text": "C2", "type": "formula", "what": "formula text referencing the client cell, no cached value"},
+    {"text": "imogen.thornfield@example.com", "type": "hyperlink", "what": "mailto hyperlink on a cell"},
+    {"text": "TF-2026-0417", "type": "header_footer", "what": "matter reference in the sheet header"},
+    {"text": "Harriet Okonkwo-Bell", "type": "header_footer", "what": "fee earner in the sheet footer"},
+    {"text": "Yusuf Castellane", "type": "data_validation", "what": "name in a dropdown list definition"},
+    {"text": "marcus.thornfield@example.com", "type": "defined_name", "what": "email stored as a defined-name constant"},
+    {"text": "7 Larkspur Close", "type": "hidden_sheet_cell", "what": "address on a hidden sheet"},
+    {"text": "541203987", "type": "hidden_sheet_cell", "what": "passport number on a very-hidden sheet"},
+    {"text": "Marcus Thornfield", "type": "metadata", "what": "client name in the Description property"}
+  ]
+}

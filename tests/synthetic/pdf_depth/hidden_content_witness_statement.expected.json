@@ -1,0 +1,20 @@
+{
+  "document": "hidden_content_witness_statement.pdf",
+  "expected_status": "READY_WITH_WARNINGS",
+  "note": "Synthetic. Text-layer PDF; every item below is outside the body text and must appear in the IR with the given block type.",
+  "seeded": [
+    {"text": "Priya Castellane", "type": "annotation", "what": "name in a sticky-note annotation"},
+    {"text": "Yusuf Castellane, DOB 14/02/1971", "type": "annotation", "what": "name and DOB in a FreeText annotation"},
+    {"text": "71002934", "type": "annotation", "what": "account number in a highlight comment on page 2"},
+    {"text": "imogen.thornfield@example.com", "type": "hyperlink", "what": "mailto link annotation"},
+    {"text": "PX 44 19 02 C", "type": "redaction_mark", "what": "NI number still under an unapplied redaction mark"},
+    {"text": "Marcus Thornfield", "type": "form_field", "what": "text form field value"},
+    {"text": "Beatrix Lund", "type": "form_field", "what": "selected dropdown value"},
+    {"text": "Dean Hollis", "type": "form_options", "what": "name only present as an unselected dropdown option"},
+    {"text": "Thornfield_bank_statement.txt", "type": "attachment", "what": "embedded file name"},
+    {"text": "20-45-67", "type": "attachment", "what": "sort code inside a text attachment"},
+    {"text": "Yusuf Castellane (draft)", "type": "bookmark", "what": "name in a bookmark title"},
+    {"text": "Harriet Okonkwo-Bell", "type": "metadata", "what": "author property"},
+    {"text": "Client Marcus Thornfield", "type": "metadata", "what": "subject property"}
+  ]
+}
