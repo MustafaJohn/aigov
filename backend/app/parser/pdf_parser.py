@@ -292,8 +292,9 @@ def parse_pdf(content: bytes) -> Tuple[List[Block], List[MetadataItem], List[str
         if to_ocr:
             try:
                 results = ocr_pdf_pages(content, to_ocr)
-            except OcrUnavailable:
-                logger.warning("OCR requested but not available on this server", exc_info=True)
+            except OcrUnavailable as e:
+                # Expected on Render's free tier; one line, not a traceback per upload
+                logger.info("OCR not available on this server (%s); scanned pages will be blocked", str(e).split(".")[0])
                 unavailable_reason = "OCR is not installed on this server"
                 over_limit = scan_pages
 
@@ -323,12 +324,22 @@ def parse_pdf(content: bytes) -> Tuple[List[Block], List[MetadataItem], List[str
                     loc.pop("gate_block_reason", None)   # one reason per page is enough
                 add("ocr_text", para, "visible", loc, f"pdf_p_{r.page_num}_ocr_{para_idx}", confidence=r.confidence)
 
-        for pnum in over_limit:
+        if over_limit:
             reason = unavailable_reason or f"over the {s['max_pages']}-page OCR limit"
-            add("scan_unread", f"[Page {pnum}: scanned image, not read ({reason})]", "visible",
-                {"page": pnum, "ocr": False,
-                 "gate_block_reason": f"Page {pnum} is a scanned image that was not read ({reason}). Nothing on it can be screened."},
-                f"pdf_p_{pnum}_scan", confidence=0.0)
+            pages = ", ".join(str(p) for p in over_limit)
+            plural = "s" if len(over_limit) > 1 else ""
+            combined = (f"Scanned page{plural} {pages} could not be read ({reason}). "
+                        f"Nothing on {'them' if plural else 'it'} can be screened.")
+            for i, pnum in enumerate(over_limit):
+                loc = {"page": pnum, "ocr": False}
+                if i == 0:
+                    loc["gate_block_reason"] = combined     # one sentence for the lawyer, not one per page
+                add("scan_unread", f"[Page {pnum}: scanned image, not read ({reason})]", "visible", loc,
+                    f"pdf_p_{pnum}_scan", confidence=0.0)
+        if over_limit and unavailable_reason:
+            warnings.append(f"Scanned pages can't be read on this server yet (page(s) {pages}). Upload the original "
+                            f"Word or text-based PDF instead, or make the scan searchable on your own computer first "
+                            f"(for example with Adobe Acrobat's 'Recognise text') and upload that version.")
 
         read = [r for r in results if r.text and not r.error]
         if read:

@@ -2,9 +2,14 @@
 Local OCR for scanned PDF pages.
 
 Rendering: pypdfium2 (pip wheel, bundles PDFium, so no Poppler is needed on the server).
-Recognition: Tesseract via pytesseract. Tesseract is a system binary; on Render it comes from the
-backend Dockerfile (apt-get install tesseract-ocr). Nothing leaves the server: this is the reason
-the brief insists on local OCR.
+Recognition: Tesseract via pytesseract. Tesseract is a system program, not a pip package, so OCR runs
+wherever it is installed (developer machines; a paid or Docker host later) and is simply unavailable
+on Render's free native Python runtime, where scanned pages are therefore BLOCKED with a plain reason.
+Nothing leaves the server: this is the reason the brief insists on local OCR.
+
+Pip-only engines were tried for the free tier and rejected (17 Nov 2026): RapidOCR peaked at about
+850 MB on one page (Render free has 512 MB) and its confidence scores did not separate good scans
+from unreadable ones, so it could not drive the gate.
 
 Every page gets a confidence between 0 and 1: the mean of Tesseract's per-word confidences,
 weighted by word length, so a page of long, clean words is not dragged down by stray specks.
@@ -17,6 +22,7 @@ Configuration (environment variables, all optional):
   OCR_BLOCK_CONFIDENCE   below this the document is BLOCKED, default 0.60
   OCR_PAGE_TIMEOUT       seconds per page before Tesseract is stopped, default 60
   OMP_THREAD_LIMIT       Tesseract threads, default 1 (see below)
+  TESSERACT_CMD          path to the tesseract program if it is not on PATH (e.g. on Windows)
 """
 import logging
 import os
@@ -27,7 +33,7 @@ from typing import List, Optional
 logger = logging.getLogger("aigov.ocr")
 
 # Tesseract is spawned per page; one OpenMP thread was 3x faster per page in testing (thread start-up
-# outweighs the gain on a single page) and suits Render's fractional CPU. The Dockerfile sets it too.
+# outweighs the gain on a single page) and suits a small shared CPU.
 os.environ.setdefault("OMP_THREAD_LIMIT", "1")
 
 
@@ -76,6 +82,9 @@ def _check_available() -> None:
     try:
         import pypdfium2  # noqa: F401
         import pytesseract
+        cmd = os.getenv("TESSERACT_CMD")
+        if cmd:
+            pytesseract.pytesseract.tesseract_cmd = cmd
         pytesseract.get_tesseract_version()
     except Exception as e:  # ImportError, TesseractNotFoundError, OSError
         raise OcrUnavailable(str(e)) from e

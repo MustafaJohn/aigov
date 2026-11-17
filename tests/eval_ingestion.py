@@ -75,6 +75,8 @@ GATE_CASES = [
      "pdf_depth/scanned_letter_clear.pdf", {"OCR_MAX_PAGES": "1"}, "BLOCKED", "over the 1-page OCR limit"),
     ("OCR switched off: a scan must block, not pass with nothing screened",
      "pdf_depth/scanned_letter_clear.pdf", {"OCR_ENABLED": "false"}, "BLOCKED", "OCR is switched off"),
+    ("No Tesseract on the server (Render free tier): a scan must block with a plain reason",
+     "pdf_depth/scanned_letter_clear.pdf", {"TESSERACT_CMD": "/nonexistent/tesseract"}, "BLOCKED", "OCR is not installed"),
 ]
 print("\nGate cases")
 for label, rel, env, want_status, want_reason in GATE_CASES:

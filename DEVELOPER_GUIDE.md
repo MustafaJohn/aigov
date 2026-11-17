@@ -164,7 +164,7 @@ LegalTech/
   - `docx_parser.py`: walks the Word XML directly; tracked insertions and deletions, hidden text, comments, headers and footers, footnotes and endnotes, text boxes, core and custom properties.
   - `xlsx_parser.py`: loads the workbook twice (values and formulas); hidden sheets, rows and columns, cell comments, formula text, hyperlinks, headers and footers, dropdown lists, defined names, properties.
   - `pdf_parser.py`: layout-aware text, annotations of every kind, unapplied redaction marks (with the text still underneath), form fields and dropdown options, attachments, bookmarks, Info and XMP properties.
-  - `ocr.py`: scanned PDF pages rendered with pypdfium2 and read with Tesseract, locally. Per-page confidence; below `OCR_WARN_CONFIDENCE` (0.80) the document gets a warning, below `OCR_BLOCK_CONFIDENCE` (0.60) it is blocked. At most `OCR_MAX_PAGES` (20) pages are read per document; any scanned page beyond that blocks the document.
+  - `ocr.py`: scanned PDF pages rendered with pypdfium2 and read with Tesseract, locally. Per-page confidence; below `OCR_WARN_CONFIDENCE` (0.80) the document gets a warning, below `OCR_BLOCK_CONFIDENCE` (0.60) it is blocked. At most `OCR_MAX_PAGES` (20) pages are read per document; any scanned page beyond that blocks the document. Where Tesseract is not installed (the Render free tier) every scanned page blocks the document, with advice to upload a text-based version.
 - Tests: `tests/eval_ingestion.py` checks every seeded off-page item in `tests/synthetic/**/*.expected.json` and the OCR gate cases. Run it alongside `tests/eval.py` before every merge.
 
 ### 3. `backend/app/llm/client.py`
@@ -198,10 +198,12 @@ Open your browser at `http://localhost:3000`.
 
 ## ☁️ Deploying the backend on Render (free tier)
 
-The backend deploys from `backend/Dockerfile`, because Render's native Python runtime cannot install the Tesseract program that OCR needs.
+The backend runs on Render's native Python runtime (no Docker, decided 17 Nov 2026).
 
-1. In the Render dashboard, open the backend service → **Settings**. Set **Runtime** to **Docker**, **Root Directory** to `backend`, and **Dockerfile Path** to `./Dockerfile`. Clear any custom build and start commands; the Dockerfile has both.
-2. Under **Environment**, keep `ALLOWED_ORIGINS=https://aigov-frontend.onrender.com`. Optional: `OCR_MAX_PAGES`, `OCR_WARN_CONFIDENCE`, `OCR_BLOCK_CONFIDENCE`, `OCR_DPI`, `OCR_ENABLED`.
-3. Deploy. The spaCy model is installed at build time from `requirements.txt`; nothing is downloaded at runtime.
+1. Build command `pip install -r requirements.txt`; start command `uvicorn app.main:app --host 0.0.0.0 --port $PORT`.
+2. Environment: `ALLOWED_ORIGINS=https://aigov-frontend.onrender.com`.
+3. The spaCy model installs at build time from `requirements.txt`; nothing is downloaded at runtime.
 
-Measured on 17 Nov 2026 (development machine, not Render): API process with spaCy loaded peaks at about 306 MB during a 2-page OCR job, and Tesseract adds about 65 MB per page at 300 dpi, so roughly 370 MB against Render free's 512 MB. A clean page took about 0.5 s with one Tesseract thread. Render's free instance has far less CPU than a laptop, so time a real scanned upload there before relying on the 20-page limit; lower `OCR_MAX_PAGES` if requests time out.
+**Scanned PDFs on Render.** OCR needs the Tesseract program, which the native Python runtime cannot install, so on Render every scanned page blocks the document with: "Scanned pages … could not be read (OCR is not installed on this server)", plus advice to upload the Word or text-based PDF, or to make the scan searchable on the lawyer's own computer first. This is deliberate: a scan is never passed on unscreened. Text-layer PDFs, Word, Excel and text files are unaffected.
+
+A pip-only OCR engine was tried for the free tier and rejected: RapidOCR peaked at about 850 MB on one page (Render free allows 512 MB), and its confidence scores did not tell a good scan from an unreadable one, so they could not drive the gate. OCR works today wherever Tesseract is installed (developer machines); enabling it in production later needs a host that can install it (a paid plan or a Docker deploy).
