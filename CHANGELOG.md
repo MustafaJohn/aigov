@@ -4,6 +4,13 @@ A high-level record of architectural decisions, customer feedback fixes, and del
 
 ---
 
+## [2026-11-17] - Deployment: spaCy model pinned at build time (Engineer B)
+- **Decision:** `en_core_web_sm` 3.8.0 is pinned in `backend/requirements.txt` as a direct wheel URL so Render installs it during the build.
+- **Reason:** `spacy_loader.get_nlp()` falls back to `spacy.cli.download()` at runtime, which on the free tier means a network download on the first upload after every cold start, and a failed request if the instance cannot reach GitHub at that moment. The fallback stays as a safety net; it should no longer be hit.
+- **Verification:** model loads at import; `tests/eval.py` 105/105 recall, 96.3% precision; `tests/eval_ingestion.py` 25/25.
+
+---
+
 ## [2026-11-11] - Week 2 (part 2): XLSX hidden-content ingestion (Engineer B)
 - **Decision:** The XLSX parser now loads each workbook twice (cached values and formulas) and surfaces everything in the file that is not on screen: hidden rows and columns, cell comments, formula text, hyperlinks, sheet headers and footers, dropdown (data-validation) lists, defined-name constants and all workbook properties. Hidden and very-hidden sheets were already covered.
 - **Reason:** With `data_only=True` alone, any formula cell whose result was never calculated by Excel (script-generated files, some export tools) came back as `None` and vanished without a warning. Values in hidden rows and hidden columns were reported as visible. Comments, mailto links, headers/footers, dropdown options and defined names were never read, and properties were captured but never detected on.
