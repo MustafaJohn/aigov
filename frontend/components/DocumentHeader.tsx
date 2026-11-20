@@ -90,7 +90,7 @@ export const DocumentHeader: React.FC<DocumentHeaderProps> = ({
           }`}
         >
           <Layers className="w-3.5 h-3.5 text-indigo-600" />
-          <span>Side-by-Side Review</span>
+          <span>1. Review & Redact</span>
         </button>
 
         <button
@@ -102,7 +102,7 @@ export const DocumentHeader: React.FC<DocumentHeaderProps> = ({
           }`}
         >
           <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-          <span>Redacted Text Only</span>
+          <span>2. Redacted Document</span>
         </button>
 
         <button
@@ -116,7 +116,7 @@ export const DocumentHeader: React.FC<DocumentHeaderProps> = ({
           }`}
         >
           <Bot className="w-3.5 h-3.5 text-purple-600" />
-          <span>AI Legal Studio</span>
+          <span>3. AI Legal Studio</span>
           <span className="text-[9px] bg-purple-100 text-purple-800 font-bold px-1 rounded">
             Self-Prompt
           </span>

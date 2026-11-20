@@ -395,12 +395,6 @@ export default function Home() {
             {/* If Document Loaded: Render Document Properties Header */}
             {docIR && activeView !== 'intake' && (
               <>
-                <GateBanner
-                  report={docIR.report}
-                  acknowledged={gateAcknowledged}
-                  onAcknowledge={() => setGateAcknowledged(true)}
-                />
-
                 <DocumentHeader
                   docIR={docIR}
                   entities={entities}
@@ -410,7 +404,13 @@ export default function Home() {
                   notesCount={notes.length}
                 />
 
-                {/* View 1: Side-by-Side Review Studio */}
+                <GateBanner
+                  report={docIR.report}
+                  acknowledged={gateAcknowledged}
+                  onAcknowledge={() => setGateAcknowledged(true)}
+                />
+
+                {/* View 1: Review & Redact Studio */}
                 {activeView === 'review' && (
                   <SideBySideReview
                     blocks={docIR.blocks}
@@ -420,6 +420,7 @@ export default function Home() {
                     onRemoveEntity={handleRemoveEntity}
                     includeHidden={includeHidden}
                     onToggleIncludeHidden={() => setIncludeHidden(!includeHidden)}
+                    onProceedToRedacted={() => selectView('redacted_only')}
                     onProceedToAI={() => selectView('ai')}
                     onUnresolvedUncertainChange={setUnresolvedUncertain}
                     onSaveDocument={handleSaveDocument}
@@ -427,12 +428,16 @@ export default function Home() {
                   />
                 )}
 
-                {/* View 2: Redacted Text Only */}
+                {/* View 2: Redacted Document Inspection */}
                 {activeView === 'redacted_only' && (
                   <RedactedOnlyView
                     blocks={docIR.blocks}
                     entities={entities}
                     documentName={docIR.source.filename}
+                    onProceedToAI={() => selectView('ai')}
+                    onBackToReview={() => selectView('review')}
+                    aiLocked={!gatePassed}
+                    gateReason={gateReason}
                   />
                 )}
 

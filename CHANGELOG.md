@@ -4,6 +4,59 @@ A high-level record of architectural decisions, customer feedback fixes, and del
 
 ---
 
+## [2026-11-20] - Week 3/4: Punch List Hardening, Non-Western Name Resolution, Universal Phone Detection & Intake Redesign (Engineer A)
+- **Decision:** Resolved all 15 punch-list vulnerability and precision gaps (P0 leak risks and P1 recall/precision gaps), enhanced personal identifier patterns (universal UK/international mobile and telephone detection, ordinals/ISO in DOB, 10-digit NHS numbers, card Luhn check), resolved non-Western name recognition and bare first-name cluster linking, eliminated redundant prompt-NER blocks in `main.py`, redesigned the frontend intake notice, and added a dual-mode redaction viewer.
+- **Reason:** Closes core security and usability blockers:
+  - People like "Courtney Hale" and "Simon Harcourt" were silently dropped by substring venue matching.
+  - ALL-CAPS names ("JOHN ALDRIDGE") and bracketed sensitive terms ("[JOHN ALDRIDGE]", "[AB 12 34 56 C]") were bypassing the outbound guard.
+  - Normal legal queries ("Summarise GDPR and SRA implications", "the £250,000 cap") were falsely blocked by a redundant prompt-NER pass.
+  - Spouses ("Mr Daniel Hale" and "Mrs Hale") and disparate entities were suffering placeholder collisions and type/placeholder mismatches.
+  - Standalone non-Western first names were misclassified by spaCy as ORG or assigned separate clusters rather than sharing the full name's placeholder.
+  - Mobile numbers in UK (`07xxx`), international (`+91`, `+1`), and labelled (`Mob`, `Tel. no:`) formats were missed.
+  - The loud, flashing "INTAKE NOTICE" banner was visually disruptive on clean, ready documents.
+- **Key Changes:**
+  - `backend/app/detector/names.py` (new): Created dedicated entity parsing library (`parse_person()`, `is_strong_form()`, `person_forms()`, `has_org_indicator()`, `org_stem()`). Distinguishes distinctive surnames (`Vance`, `Aldridge`) requiring hard outbound blocks from common dictionary words (`Grant`, `Will`, `Rose`) routed to lawyer review. Handles Celtic/Norman particle names (`Ní`, `Ó`, `Mc`, `Mac`, `de`, `van`).
+  - `backend/app/detector/engine.py`:
+    - Refactored to 7-stage deterministic pipeline (public legal span suppression, candidate generation with case-folding, evidence filtering, person clustering, span overlap resolution, typed placeholder allocation, occurrence propagation).
+    - Added first-name ORG reclassification to `PERSON` for single words matching confirmed full names.
+    - Added bare-cluster merging so standalone first names (e.g. `Amaan`) link into owner clusters and share `[PERSON 1]` without numbering gaps or phantom clusters.
+  - `backend/app/detector/patterns.py`:
+    - Replaced substring matching in `PUBLIC_VENUE_OR_CLAUSE` with word-boundary regex (`\b(?:court|tribunal|...)\b`).
+    - Extended `COMPANY_REGEX` for ALL-CAPS corporate suffixes.
+    - Overhauled `PHONE` to pure Python regex supporting all UK mobiles, international E.164 (`+91`, `+1`, `+44`, `+92`, `+33`), bracketed, hyphenated, and labelled prefixes (`Mob`, `Tel. no:`, `Contact No:`).
+    - Enhanced `DATE_OF_BIRTH` with ordinals (`14th of March 1980`), ISO dates, and prefixes.
+    - Added NHS 10-digit number pattern to `REFERENCE`.
+    - Added Luhn checksum validation to `CREDIT_CARD` and standard `[CARD n]` placeholder format.
+    - Added HMCTS claim numbers (`KB-2026-000123`) to `MATTER_REF`.
+  - `backend/app/guard/checker.py`:
+    - Outbound gate enforces uppercase alias checks to prevent ALL-CAPS bypasses.
+    - Restricted placeholder bypass to authenticated `PLACEHOLDER_REGEX` (`[TYPE n]`); bracketed PII is inspected and blocked.
+    - Full defense-in-depth scan on document and prompt for raw structured PII when `active_entities` is empty.
+    - Split hard blocks from soft review warnings (`review_items`) with lawyer acknowledgement workflow.
+  - `backend/app/main.py`:
+    - Removed redundant prompt-NER pass that falsely blocked standard legal terminology.
+    - Integrated clean block vs. review dispatch handling.
+  - `backend/app/parser/docx_parser.py`:
+    - Fixed nested table extraction to inspect the nearest table ancestor only (`next(p.iterancestors(W + "tbl"), None) is tbl`), preventing dropped paragraphs in nested tables.
+  - `backend/app/llm/client.py`:
+    - Implemented `_generate_demo_legal_briefing` for structured, plain-English legal executive briefings in offline/demo mode.
+  - `frontend/components/GateBanner.tsx` & `frontend/app/page.tsx`:
+    - Suppressed intake banner when document status is `READY`.
+    - Reordered intake notice below `DocumentHeader` to preserve visual hierarchy.
+    - Refined typography and replaced pulsing red badges with institutional legal styling.
+  - `frontend/components/RedactedOnlyView.tsx`:
+    - Added dual-mode view switcher ("Clean Redacted" vs "Side-by-Side Comparison") with color-coded placeholder chips and navigation actions.
+  - `tests/test_reviewer_fixes.py`: Expanded from 20 to 42 verification tests (Punches 1–19).
+  - `tests/test_detection_regressions.py` & `tests/detection_cases.py` (new): 30-case regression suite with gate parity checks.
+  - `tests/fixtures/lor.txt` (new): Real-world recommendation letter fixture verifying Indian mobiles and non-Western name forms.
+- **Verification:**
+  - `tests/test_reviewer_fixes.py`: 42/42 tests passing.
+  - `tests/test_detection_regressions.py`: 30/30 cases passing.
+  - `tests/eval.py`: 105/105 recall (100.0%), 99.1% overall precision, 0 false negatives, fail-safe gate passed.
+  - `frontend`: `tsc --noEmit --incremental false` passed with 0 errors.
+
+---
+
 ## [2026-11-17] - Week 3: PDF hidden content, local OCR with a confidence gate, audit-record proposal (Engineer B)
 - **Decision:** The PDF parser now surfaces everything in a PDF that is not body text, and scanned pages are read locally with Tesseract instead of being passed through unread. A scanned page that cannot be read, is read below the minimum confidence, falls beyond the OCR page limit, or meets a server without Tesseract now **blocks** the document. The backend stays on Render's native Python runtime (no Docker, decided 17 Nov), so in production scanned PDFs are blocked with advice to upload a text-based version; OCR runs wherever Tesseract is installed.
 - **Reason:** Before this change a scanned letter came back with no text at all and the gate still said `READY_WITH_WARNINGS`, so a scan could reach the AI step with nothing on it screened. Dropdown options, link targets, attachments and bookmarks were never read, and an unapplied redaction mark was reported only as its note, not as text still sitting in the file.

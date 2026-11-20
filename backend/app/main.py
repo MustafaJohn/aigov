@@ -1,10 +1,9 @@
 import os
-import re
 import logging
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request
+from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import List
 
 from app.models import (
     DocumentIR,
@@ -96,50 +95,35 @@ async def summarize(request: SummarizeRequest):
     # 1. Use typed active_entities from request
     active_entities: List[DetectedEntity] = request.active_entities
 
-    # 2. Server-side Outbound Guard: always verify document and prompt (even if active_entities is empty)
+    # 2. Server-side outbound guard on the document text and the instruction. This is the only
+    #    screening step: it checks every detected value and its aliases, plus every structured
+    #    identifier pattern, in both. (The earlier extra NER pass over the instruction blocked
+    #    ordinary instructions such as "Summarise the GDPR and SRA implications".)
     outbound_res = GuardEngine.check_outbound(OutboundCheckRequest(
         doc_id="server_check",
         protected_text=request.protected_text,
         active_entities=active_entities or [],
         user_prompt=request.instructions or ""
     ))
+
+    def blocked(message: str) -> SummarizeResponse:
+        return SummarizeResponse(success=False, summary="", provider=request.provider,
+                                 model=request.model or "unknown", error=message)
+
     if not outbound_res.passed:
-        leaks = outbound_res.leaked_items + outbound_res.prompt_leaks
-        return SummarizeResponse(
-            success=False,
-            summary="",
-            provider=request.provider,
-            model=request.model or "unknown",
-            error=f"Security gate blocked dispatch: {outbound_res.explanation} Details: {', '.join(leaks[:4])}"
-        )
+        found = outbound_res.leaked_items + [f"{p} (in your instruction)" for p in outbound_res.prompt_leaks]
+        return blocked(f"{outbound_res.explanation} Still visible: {'; '.join(found[:4])}"
+                       + (f" and {len(found) - 4} more." if len(found) > 4 else "."))
+    if outbound_res.review_items and not request.acknowledged_review_items:
+        return blocked(f"{outbound_res.explanation} Please confirm these are fine to send: {'; '.join(outbound_res.review_items[:4])}"
+                       + (f" and {len(outbound_res.review_items) - 4} more." if len(outbound_res.review_items) > 4 else "."))
 
-    # 3. Defense-in-depth prompt screening: screen lawyer instructions for unmasked sensitive items
-    if request.instructions and request.instructions.strip():
-        prompt_text = request.instructions.strip()
-        prompt_ir = intake_file("prompt.txt", prompt_text.encode("utf-8"))
-        prompt_det = detection_engine.detect(prompt_ir)
-        unmasked_prompt_ents = [
-            e for e in prompt_det.entities
-            if not re.match(r"^\[[A-Z_\s0-9]+\]$", e.text)
-        ]
-        if unmasked_prompt_ents:
-            leaked_summary = ", ".join(f"{e.type}: '{e.text}'" for e in unmasked_prompt_ents[:4])
-            return SummarizeResponse(
-                success=False,
-                summary="",
-                provider=request.provider,
-                model=request.model or "unknown",
-                error=f"Security gate blocked dispatch: Lawyer instructions contain unmasked sensitive identifiers ({leaked_summary}). Please use placeholders or remove real details."
-            )
-
-    # 4. Dispatch to LLM provider
+    # 3. Dispatch to LLM provider
     response = await execute_llm_summary(request)
 
-    # 5. Inbound scan verification on the AI response (returned as its own typed field)
-    inbound_warnings: List[str] = []
-    if response.success and response.summary and active_entities:
-        inbound_warnings = GuardEngine.check_inbound(response.summary, active_entities)
-    response.inbound_warnings = inbound_warnings
+    # 4. Inbound scan of the AI response: known details and any structured identifier it contains
+    if response.success and response.summary:
+        response.inbound_warnings = GuardEngine.check_inbound(response.summary, active_entities or [])
 
     return response
 

@@ -67,6 +67,9 @@ export function generateTypedPlaceholder(
   else if (prefix === 'UK POSTCODE') prefix = 'POSTCODE';
   else if (prefix === 'MATTER REF') prefix = 'MATTER';
   else if (prefix === 'DATE OF BIRTH') prefix = 'DATE';
+  else if (prefix === 'IHS REFERENCE' || prefix === 'IHS REF') prefix = 'IHS';
+  else if (prefix === 'CREDIT CARD' || prefix === 'CARD') prefix = 'CARD';
+  else if (prefix === 'REFERENCE' || prefix === 'REF') prefix = 'REF';
 
   const sameTypeCount = existingEntities.filter((e) => {
     const ph = e.placeholder || '';
