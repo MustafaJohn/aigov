@@ -51,7 +51,7 @@ class DetectedEntity(BaseModel):
     start: int
     end: int
     text: str
-    type: str  # PERSON, ORG, NI_NUMBER, SORT_CODE, ACCOUNT_NUMBER, EMAIL, PHONE, ADDRESS, DATE, MATTER_REF
+    type: str  # PERSON, ORGANISATION, or a key of detector.patterns.PATTERNS (NI_NUMBER, REFERENCE, ...)
     placeholder: str
     confidence: float = 1.0
     is_active: bool = True  # Lawyer can toggle inclusion
@@ -72,9 +72,10 @@ class OutboundCheckRequest(BaseModel):
     user_prompt: str
 
 class OutboundCheckResponse(BaseModel):
-    passed: bool
+    passed: bool                                                   # False = hard block
     leaked_items: List[str] = Field(default_factory=list)
     prompt_leaks: List[str] = Field(default_factory=list)
+    review_items: List[str] = Field(default_factory=list)          # need the lawyer's acknowledgement, not a block
     explanation: str
 
 class SummarizeRequest(BaseModel):
@@ -84,6 +85,7 @@ class SummarizeRequest(BaseModel):
     protected_text: str
     instructions: Optional[str] = "Provide a concise legal summary of the following document."
     active_entities: List[DetectedEntity] = Field(default_factory=list)
+    acknowledged_review_items: bool = False    # lawyer has confirmed the guard's review items are not personal details
 
 class SummarizeResponse(BaseModel):
     success: bool

@@ -260,9 +260,11 @@ def parse_docx(content: bytes) -> Tuple[List[Block], List[MetadataItem], List[st
             for tc in (c for c in tr if etree.QName(c).localname == "tc"):
                 paras = []
                 for p in tc.iter(W + "p"):
-                    # paragraphs of a nested table are reported with that table; skip here
-                    if p.getparent() is not None and any(etree.QName(a).localname == "tbl" and a is not tbl
-                                                        for a in p.iterancestors()):
+                    # paragraphs of a nested table are reported with that table; skip here.
+                    # Compare with the NEAREST table only: every paragraph in a nested table also has
+                    # the outer table as an ancestor, so checking all ancestors skipped nested text in
+                    # both passes and it was never screened or sent.
+                    if next(p.iterancestors(W + "tbl"), None) is not tbl:
                         continue
                     parts = _ParaParts(); _walk_paragraph(p, parts)
                     ptxt = "".join(parts.visible).strip()

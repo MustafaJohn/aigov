@@ -31,6 +31,7 @@ interface SideBySideReviewProps {
   includeHidden: boolean;
   onToggleIncludeHidden: () => void;
   onProceedToAI: () => void;
+  onProceedToRedacted?: () => void;
   /** Lets the page know how many uncertain items still block dispatch (used to lock the AI view). */
   onUnresolvedUncertainChange?: (count: number) => void;
   onSaveDocument?: () => void;
@@ -46,6 +47,7 @@ export const SideBySideReview: React.FC<SideBySideReviewProps> = ({
   includeHidden,
   onToggleIncludeHidden,
   onProceedToAI,
+  onProceedToRedacted,
   onUnresolvedUncertainChange,
   onSaveDocument,
   onAddQuickNote,
@@ -314,21 +316,21 @@ export const SideBySideReview: React.FC<SideBySideReviewProps> = ({
 
           <button
             type="button"
-            onClick={onProceedToAI}
+            onClick={onProceedToRedacted ? onProceedToRedacted : onProceedToAI}
             disabled={unresolvedUncertainCount > 0}
             className={`flex items-center space-x-1.5 text-xs font-semibold px-4 py-2 rounded-lg shadow-sm transition-colors cursor-pointer ${
               unresolvedUncertainCount > 0
                 ? 'bg-slate-200 text-slate-400 cursor-not-allowed border border-slate-300'
                 : 'bg-indigo-600 hover:bg-indigo-700 text-white'
             }`}
-            title={unresolvedUncertainCount > 0 ? `Please confirm or dismiss ${unresolvedUncertainCount} uncertain item(s) before proceeding` : 'Proceed to AI Assistant'}
+            title={unresolvedUncertainCount > 0 ? `Please confirm or dismiss ${unresolvedUncertainCount} uncertain item(s) before proceeding` : 'Proceed to Redacted Document'}
           >
             {unresolvedUncertainCount > 0 ? (
               <span className="flex items-center space-x-1">
                 <span>Gate: Resolve {unresolvedUncertainCount} Uncertain Items</span>
               </span>
             ) : (
-              <span>Open in AI Assistant</span>
+              <span>Proceed to Redacted Document</span>
             )}
             <ArrowRight className="w-3.5 h-3.5" />
           </button>
@@ -472,54 +474,57 @@ export const SideBySideReview: React.FC<SideBySideReviewProps> = ({
         </div>
       )}
 
-      {/* Main Studio Grid */}
+      {/* Main Review Grid: Stage 1 (Document Canvas + Redaction Inspector) */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-        {/* Left Side: Original Document & Selection */}
-        <div className="lg:col-span-5 bg-white border border-slate-200 rounded-xl shadow-2xs flex flex-col h-[680px]">
-          <div className="px-4 py-3 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
+        {/* Left Side: Authentic Legal Document Canvas (lg:col-span-8) */}
+        <div className="lg:col-span-8 bg-white border border-slate-200 rounded-xl shadow-2xs flex flex-col h-[740px]">
+          <div className="px-5 py-3 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
             <div className="flex items-center space-x-2">
-              <span className="w-2.5 h-2.5 rounded-full bg-slate-400"></span>
+              <span className="w-2.5 h-2.5 rounded-full bg-indigo-600"></span>
               <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700">
-                Original Document
+                Legal Document Canvas
               </h4>
             </div>
-            <span className="text-[11px] text-slate-500">
-              Select any text to redact • Click highlights to toggle
+            <span className="text-[11px] text-slate-500 hidden sm:inline">
+              Select text to redact • Click highlights to toggle
             </span>
           </div>
 
           <div
             onMouseUp={handleMouseUp}
-            className="p-4 overflow-y-auto space-y-3 flex-1 font-sans text-sm text-slate-800 leading-relaxed select-text"
+            className="p-4 sm:p-6 bg-slate-50/70 overflow-y-auto flex-1 select-text flex justify-center"
           >
-            {displayBlocks.map((block) => (
-              <div
-                key={block.id}
-                data-block-id={block.id}
-                className={`p-3 rounded-lg border transition-colors ${
-                  block.visibility !== 'visible'
-                    ? 'bg-amber-50/50 border-amber-200 text-slate-700'
-                    : 'bg-slate-50/40 border-slate-100 hover:border-slate-300'
-                }`}
-              >
-                {block.visibility !== 'visible' && (
-                  <span className="text-[10px] uppercase font-mono font-bold text-amber-700 mr-2">
-                    [{block.type}]
-                  </span>
-                )}
-                {renderOriginalText(block)}
-              </div>
-            ))}
+            <div className="w-full max-w-3xl bg-white shadow-xs border border-slate-200/90 rounded-lg p-6 sm:p-10 min-h-full">
+              {displayBlocks.map((block) => (
+                <div
+                  key={block.id}
+                  data-block-id={block.id}
+                  className="mb-4 last:mb-0 text-[14.5px] leading-[1.8] text-slate-800 tracking-[-0.01em] transition-colors rounded px-1 -mx-1 hover:bg-slate-50/70"
+                >
+                  {block.visibility !== 'visible' && (
+                    <div className="mb-1">
+                      <span className="text-[10px] uppercase font-mono font-bold text-amber-800 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded">
+                        [{block.type} • {block.visibility}]
+                      </span>
+                    </div>
+                  )}
+                  {renderOriginalText(block)}
+                </div>
+              ))}
+            </div>
           </div>
         </div>
 
-        {/* Center: Redaction Inspector & Manual Term Controller */}
-        <div className="lg:col-span-3 bg-white border border-slate-200 rounded-xl shadow-2xs flex flex-col h-[680px]">
+        {/* Right Side: Redaction Inspector & Manual Term Controller (lg:col-span-4) */}
+        <div className="lg:col-span-4 bg-white border border-slate-200 rounded-xl shadow-2xs flex flex-col h-[740px]">
           <div className="px-4 py-3 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
             <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
               <ShieldAlert className="w-3.5 h-3.5 text-indigo-600" />
-              Redacted Items ({entities.length})
+              Redaction Inspector ({entities.length})
             </h4>
+            <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded">
+              {activeEntitiesCount} Active
+            </span>
           </div>
 
           {/* Quick Add Custom Word/Phrase to Redact */}
@@ -702,32 +707,6 @@ export const SideBySideReview: React.FC<SideBySideReviewProps> = ({
                 </div>
               ))
             )}
-          </div>
-        </div>
-
-        {/* Right Side: Live Redacted Preview (With XXX / XYZ Jargon) */}
-        <div className="lg:col-span-4 bg-white border border-slate-200 rounded-xl shadow-2xs flex flex-col h-[680px]">
-          <div className="px-4 py-3 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
-            <div className="flex items-center space-x-2">
-              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
-              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700">
-                Redacted Document Preview
-              </h4>
-            </div>
-            <span className="text-[10px] font-mono font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded">
-              PROTECTED PREVIEW (TYPED PLACEHOLDERS)
-            </span>
-          </div>
-
-          <div className="p-4 overflow-y-auto space-y-3 flex-1 font-mono text-xs text-slate-700 bg-slate-50/40 leading-relaxed select-text">
-            {displayBlocks.map((block) => (
-              <div
-                key={block.id}
-                className="p-3 rounded-lg border border-slate-200 bg-white"
-              >
-                {generateProtectedBlockText(block, entities)}
-              </div>
-            ))}
           </div>
         </div>
       </div>

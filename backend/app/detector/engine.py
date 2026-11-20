@@ -1,135 +1,129 @@
-import uuid
+"""
+Detection engine: finds personal and confidential details in a DocumentIR and assigns each a
+typed placeholder ([PERSON 1], [ORG 2], [REF 1] ...).
+
+Pipeline (one method per stage, in order):
+  1. public spans     public legal references (legislation, case numbers, ECLI, courts, EU
+                      institutions, glossed foreign bodies). NER never masks inside these.
+  2. candidates       structured patterns (always win), rule-based names and organisations, and
+                      spaCy NER. Text in capitals is also read in normal case, so pleadings
+                      headings ("JOHN ALDRIDGE") are found.
+  3. evidence filters ordinary-word NER guesses are dropped using the document's own evidence
+                      (the word also appears in lower case, or is an acronym of lower-case words).
+  4. people           mentions are clustered into individuals (surname, first name, initial,
+                      honorific gender), and every alias of each individual is found.
+  5. spans            overlaps resolved; structured values can never be swallowed.
+  6. placeholders     allocated from the final type of each span, so a type change during
+                      overlap resolution can never leave an ORG with a [PERSON n] placeholder.
+  7. propagation      every further occurrence of a detected value is masked too, so the outbound
+                      gate never finds an unmasked copy of something the tool itself detected.
+
+Rules are generic English/UK legal-drafting conventions. No client, matter or test-document
+values belong here.
+"""
 import re
-from typing import List, Dict, Tuple, Set, Optional, Any
+import uuid
 from dataclasses import dataclass, field
+from typing import Dict, List, Optional, Set, Tuple
+
 from app.models import DocumentIR, DetectedEntity, DetectionResult
 from app.detector.spacy_loader import get_nlp
+from app.detector.names import (
+    TITLE_GENDER, PersonName, has_org_indicator, is_all_caps, lowercase_words,
+    name_occurrences, org_stem, parse_person, person_forms, NAME_TOKEN,
+)
 from app.detector.patterns import (
-    PATTERNS,
-    PERSON_TITLES_REGEX,
-    COMPANY_REGEX,
-    BANK_REGEX
+    PATTERNS, PLACEHOLDER_PREFIX, PERSON_TITLES_REGEX, PARTICLE_NAME_REGEX, SURNAME_FIRST_REGEX,
+    COMPANY_REGEX, BANK_REGEX, PUBLIC_LEGAL_REFERENCE_REGEX, PUBLIC_INSTITUTION_REGEX,
+    GLOSSED_PUBLIC_BODY_REGEX, CITED_CASE_NAME_REGEX, LATE_PERSON_REGEX,
 )
 
-# Standard UK/International corporate suffixes and entity indicators
-ORG_INDICATORS: Tuple[str, ...] = (
-    "llp", "ltd", "limited", "plc", "llc", "inc", "corp", "corporation",
-    "holdings", "partners", "chambers", "solicitors", "law firm", "bank",
-    "school", "academy", "college", "university", "hospital", "clinic",
-    "care home", "council", "association", "agency", "trust", "foundation", "centre", "center",
-    "factory", "systems", "logistics", "services"
+# A NER span containing one of these whole words is a court, venue or standard clause heading
+PUBLIC_VENUE_OR_CLAUSE = re.compile(
+    r"\b(?:court|tribunal|justice\s+centre|magistrates|jurisdiction|severability|entire\s+agreement|governing\s+law|confidentiality|warranties|indemnities)\b",
+    re.IGNORECASE,
 )
+STREET_SUFFIX = re.compile(r"\b(?:road|street|avenue|lane|drive|way|close|grove|gardens|terrace|square|crescent)$", re.IGNORECASE)
 
-# Public judicial venues and standard contractual boilerplate (not private client organizations)
-PUBLIC_VENUES_OR_CLAUSES: Tuple[str, ...] = (
-    "court", "tribunal", "jurisdiction", "severability", "entire agreement",
-    "governing law", "confidentiality", "warranties", "indemnities"
-)
+# Form/table field labels and legal role nouns. A NER span made only of these words is a label
+# ("Matter Ref", "Role", "Client"), not a name.
+LABEL_WORDS = {"attendance", "note", "tel", "telephone", "email", "e-mail", "phone", "mob", "mobile", "row", "ledger",
+               "party", "parties", "notice", "claimant", "respondent", "defendant", "agreement", "executive",
+               "dob", "d.o.b", "client", "matter", "ref", "reference", "our", "your", "signed", "dated", "name",
+               "role", "title", "position", "contact", "address", "date", "amount", "account", "sort", "code",
+               "status", "type", "description", "notes", "total", "department", "number", "no",
+               # document-structure headings
+               "order", "judgment", "schedule", "exhibit", "defence", "particulars", "claim", "statement", "witness",
+               "consent", "application", "appendix", "annex", "between", "recitals", "background", "summary",
+               # email/memo header labels
+               "from", "to", "subject", "re", "fw", "fwd", "cc", "bcc", "sent", "received"}
+STRUCTURED_CONFIDENCE_1 = {"NI_NUMBER", "SORT_CODE", "ACCOUNT_NUMBER", "CREDIT_CARD", "UK_POSTCODE", "EMAIL", "DRIVING_LICENCE"}
+FUNCTION_WORDS = {"the", "your", "our", "their", "and", "for", "with", "from", "this", "that", "into", "onto", "upon"}
+CORPORATE_ACRONYMS = {"LLP", "PLC", "LTD", "LLC", "INC"}
 
-# Street suffixes to prevent addresses from being mislabelled as organizations
-STREET_SUFFIXES: Tuple[str, ...] = (
-    "road", "street", "avenue", "lane", "drive", "way", "close",
-    "grove", "gardens", "terrace", "square", "crescent"
-)
+# "WITNESS STATEMENT OF MEENA PATEL"
+CAPS_HEADING_REGEX = re.compile(r"\b(?:STATEMENT|AFFIDAVIT|DEED|MEMORANDUM)\s+OF\s+([A-Z]{2,}(?:\s+[A-Z]{2,}){1,2})\b")
 
-# Compiled regex for legal heading names (e.g. "WITNESS STATEMENT OF MEENA PATEL")
-CAPS_HEADING_REGEX = re.compile(
-    r"\b(?:STATEMENT|AFFIDAVIT|DEED|MEMORANDUM)\s+OF\s+([A-Z]{2,}(?:\s+[A-Z]{2,}){1,2})\b"
-)
-
-# Structural role-based party definitions in contracts and attendance notes
-# Restrict delimiters to : or - (avoid bare commas which appear in prose)
+# "Employee: Marcus Sterling", "Prepared by - Jane Doe" (delimiter must be : or -, never a bare comma)
+_ROLE_NAME = rf"{NAME_TOKEN}(?:[ \t]+{NAME_TOKEN}){{1,2}}"
 ROLE_PREFIX_REGEX = re.compile(
-    r"(?i:\b(?:Claimant|Respondent|Defendant|Plaintiff|Appellant|Solicitor|Counsel|Fee\s+Earner|Partner|Director|Witness|Author|Client|Party(?:\s+[A-Z])?|Name|Full\s+Name|Candidate|Employee|Applicant|Executive|Prepared\s+by|Attn|Attention|Dear)\b)[ \t]*[:\-–][ \t]*([A-Z][a-z]+(?:-[A-Z][a-z]+)?(?:[ \t]+[A-Z][a-z]+(?:-[A-Z][a-z]+)?){1,2})\b"
+    r"(?i:\b(?:Claimant|Respondent|Defendant|Plaintiff|Appellant|Solicitor|Counsel|Fee\s+Earner|Partner|Director|Witness|"
+    r"Author|Client|Party(?:\s+[A-Z])?|Name|Full\s+Name|Candidate|Employee|Applicant|Executive|Prepared\s+by|Attn|Attention|Dear)\b)"
+    rf"[ \t]*[:\-–][ \t]*(?:(?:Mr|Mrs|Ms|Miss|Dr)\.?[ \t]+)?({_ROLE_NAME})(?!\w)"
 )
-
+# "Marcus Sterling (Executive)"
 PARENTHETICAL_ROLE_REGEX = re.compile(
-    r"\b([A-Z][a-z]+(?:[ \t]+[A-Z][a-z]+){1,2})[ \t]*\((?:Executive|Employee|Director|Partner|Witness|Client|Claimant|Respondent|Defendant)\)"
+    rf"({_ROLE_NAME})[ \t]*\((?:Executive|Employee|Director|Partner|Witness|Client|Claimant|Respondent|Defendant)\)"
 )
+NON_PERSON_ROLE_WORDS = {"human", "resources", "team", "department", "division", "not", "provided", "applicable",
+                         "unknown", "none", "corporate", "commercial", "litigation", "finance", "legal"}
 
-# Non-name department or placeholder words to prevent catching non-persons in role regex
-NON_PERSON_ROLE_WORDS: Set[str] = {
-    "human", "resources", "team", "department", "division", "not", "provided",
-    "applicable", "unknown", "none", "corporate", "commercial", "litigation", "finance", "legal"
-}
-
-# Known titles & honorifics classification with gender mapping
-TITLE_GENDER_MAP: Dict[str, str] = {
-    "mr": "M", "lord": "M", "sir": "M", "master": "M",
-    "mrs": "F", "ms": "F", "miss": "F", "lady": "F", "dame": "F", "baroness": "F",
-    "dr": "U", "prof": "U", "justice": "U", "judge": "U", "hon": "U"
-}
+_CAPS_WORD = re.compile(r"(?<![\w'’-])[A-ZÀ-Þ][A-ZÀ-Þ'’\-]+(?![\w'’-])")
 
 
-@dataclass
-class ParsedPersonMention:
-    raw_text: str
-    clean_name: str
-    honorific: Optional[str] = None
-    first_name: Optional[str] = None
-    middle_tokens: List[str] = field(default_factory=list)
-    surname: Optional[str] = None
-    initial: Optional[str] = None
-    gender: str = "U"  # "M", "F", "U"
-    is_full_name: bool = False
+def caps_normalised(text: str) -> str:
+    """Same text with words in capitals rewritten in normal case; offsets are unchanged."""
+    def fix(m: re.Match) -> str:
+        w = m.group()
+        if w in CORPORATE_ACRONYMS:
+            return w
+        t = w.title()
+        return t if len(t) == len(w) else w
+    return _CAPS_WORD.sub(fix, text)
 
 
-def parse_person_tokens(text: str) -> ParsedPersonMention:
-    """
-    Parses a person mention into honorific, first name, middle tokens, surname, initial, and gender hint.
-    """
-    raw = text.strip()
-    words = raw.split()
-    honorific = None
-    gender = "U"
-    remaining_words = words
+_CAPS_RUN = re.compile(r"(?<![\w'’-])[A-ZÀ-Þ][A-ZÀ-Þ'’\-]+[ \t]+[A-ZÀ-Þ][A-ZÀ-Þ'’\-]+(?![\w'’-])")
 
-    if words:
-        first_clean = words[0].strip(".,").lower()
-        if first_clean in TITLE_GENDER_MAP:
-            honorific = words[0].strip(".,")
-            gender = TITLE_GENDER_MAP[first_clean]
-            remaining_words = words[1:]
 
-    clean_tokens = [w.strip(".,") for w in remaining_words if w.strip(".,")]
-    # Strip leading English determiners or prepositions (e.g. "the Vance" -> "Vance")
-    while clean_tokens and clean_tokens[0].lower() in {"the", "a", "an", "this", "that", "in", "for", "with", "from", "and", "or"}:
-        clean_tokens.pop(0)
+def needs_caps_pass(text: str) -> bool:
+    """A name in capitals is at least two capitalised words; a lone acronym (KB, UK, IHS) is not."""
+    return bool(_CAPS_RUN.search(text))
 
-    if not clean_tokens:
-        return ParsedPersonMention(raw_text=raw, clean_name=raw, honorific=honorific, gender=gender)
 
-    # Conjoined phrases (e.g. "Claimant and Vance") are not a single individual
-    has_conjunction = any(t.lower() in ("and", "or", "&") for t in clean_tokens)
+def _strip_possessive(name: str) -> str:
+    return re.sub(r"['’]s?$", "", name) if re.search(r"\w['’]s?$", name) else name
 
-    surname = clean_tokens[-1]
-    first_name = None
-    initial = None
-    middle_tokens = []
-    is_full = False
 
-    if len(clean_tokens) >= 2 and not has_conjunction:
-        is_full = True
-        first_token = clean_tokens[0]
-        if len(first_token) == 1:
-            initial = first_token.upper()
-        else:
-            first_name = first_token
-            initial = first_name[0].upper()
-        middle_tokens = clean_tokens[1:-1]
+def _has_caps_word(span: str) -> bool:
+    return any(is_all_caps(w) for w in span.split())
 
-    clean_name = " ".join(clean_tokens)
-    return ParsedPersonMention(
-        raw_text=raw,
-        clean_name=clean_name,
-        honorific=honorific,
-        first_name=first_name,
-        middle_tokens=middle_tokens,
-        surname=surname,
-        initial=initial,
-        gender=gender,
-        is_full_name=is_full
-    )
+
+_RELATIVE = r"(?:wife|husband|spouse|widow|widower|mother|father|mum|dad|son|daughter|sister|brother|grandmother|grandfather|aunt|uncle|niece|nephew|cousin|stepmother|stepfather|stepson|stepdaughter)"
+_RELATIVE_BEFORE = re.compile(rf"\b{_RELATIVE}\b[\s,:-]*$", re.IGNORECASE)
+_RELATIVE_AFTER = re.compile(rf"^[\s,]*\((?:my|his|her|their|the\s+\w+'s)\s+{_RELATIVE}\)", re.IGNORECASE)
+
+
+def is_relative_mention(text: str, start: int, end: int) -> bool:
+    """'his wife, Mrs Vance' / 'Mrs Patel (my mother)': a titled mention that names a relative is a different person."""
+    return bool(_RELATIVE_BEFORE.search(text[max(0, start - 30):start]) or _RELATIVE_AFTER.search(text[end:end + 40]))
+
+
+# Full Name ("Short") / (the "Short") / (hereinafter "Short")
+_DEFINED_TERM = re.compile(r"^\s*\(\s*(?:hereinafter\s+(?:called\s+|referred\s+to\s+as\s+)?)?(the\s+)?[\"“”'‘’]([^\"“”'‘’]{2,40})[\"“”'‘’]\s*\)", re.IGNORECASE)
+
+
+def _overlaps(a: Tuple[int, int], b: Tuple[int, int]) -> bool:
+    return max(a[0], b[0]) < min(a[1], b[1])
 
 
 @dataclass
@@ -138,958 +132,663 @@ class PersonCluster:
     canonical_name: str
     surname: str
     first_name: Optional[str] = None
-    middle_tokens: List[str] = field(default_factory=list)
     initials: Set[str] = field(default_factory=set)
-    gender: str = "U"  # "M", "F", "U"
-    placeholder: Optional[str] = None
-    canonical_id: Optional[str] = None
-    confidence: float = 0.90
+    gender: str = "U"
     tier: str = "confident"
-    entities: List[DetectedEntity] = field(default_factory=list)
+    confidence: float = 0.90
 
 
 class EntityRegistry:
-    """
-    Manages consistent typed placeholders and canonical identity mapping.
-    Includes entity_type in the registry key so reclassified entities never inherit
-    the wrong category placeholder (e.g. PERSON never gets [ORG 1]).
-    """
-    def __init__(self):
+    """One placeholder per (type, canonical key) within a document."""
+    def __init__(self) -> None:
         self.counters: Dict[str, int] = {}
         self.registry: Dict[Tuple[str, str], Tuple[str, str]] = {}
 
-    def allocate(self, entity_type: str, canonical_key: str) -> Tuple[str, str]:
-        prefix = entity_type.replace("_", " ").upper()
-        if prefix in ("ORGANISATION", "ORGANIZATION"):
-            prefix = "ORG"
-        elif prefix == "ACCOUNT NUMBER":
-            prefix = "ACCOUNT"
-        elif prefix == "MONETARY AMOUNT":
-            prefix = "AMOUNT"
-        elif prefix == "PHYSICAL ADDRESS":
-            prefix = "ADDRESS"
-        elif prefix == "UK POSTCODE":
-            prefix = "POSTCODE"
-        elif prefix == "MATTER REF":
-            prefix = "MATTER"
-        elif prefix == "DATE OF BIRTH":
-            prefix = "DATE"
-
-        lookup_key = (prefix, canonical_key.strip().lower())
-        if lookup_key in self.registry:
-            return self.registry[lookup_key]
-
-        self.counters[prefix] = self.counters.get(prefix, 0) + 1
-        placeholder = f"[{prefix} {self.counters[prefix]}]"
-        canon_id = f"canon_{prefix.lower().replace(' ', '_')}_{self.counters[prefix]}"
-
-        self.registry[lookup_key] = (canon_id, placeholder)
-        return canon_id, placeholder
+    def allocate(self, entity_type: str, key: str) -> Tuple[str, str]:
+        prefix = PLACEHOLDER_PREFIX.get(entity_type, entity_type.replace("_", " "))
+        lookup = (prefix, key.strip().lower())
+        if lookup not in self.registry:
+            self.counters[prefix] = self.counters.get(prefix, 0) + 1
+            n = self.counters[prefix]
+            self.registry[lookup] = (f"canon_{prefix.lower().replace(' ', '_')}_{n}", f"[{prefix} {n}]")
+        return self.registry[lookup]
 
 
-def extract_org_stem(text: str) -> str:
-    """Extracts distinctive core organisation stem by stripping standard corporate indicators."""
-    stem = re.sub(
-        r"(?i)\b(?:llp|ltd\.?|limited|plc|llc|inc\.?|corp\.?|corporation|holdings|partners|chambers|solicitors|law\s+firm|bank|school|academy|college|hospital|clinic|systems|logistics|services|group)\b\.?$",
-        "",
-        text.strip()
-    ).strip()
-    return stem if len(stem) >= 3 else text.strip()
+def _entity(block_id: str, start: int, end: int, text: str, type_: str, confidence: float, tier: str = "confident") -> DetectedEntity:
+    return DetectedEntity(id=f"ent_{uuid.uuid4().hex[:10]}", block_id=block_id, start=start, end=end, text=text,
+                          type=type_, placeholder="", confidence=confidence, is_active=True, surface_forms=[text], tier=tier)
 
 
 class DetectionEngine:
-    """
-    Production entity detection engine adhering to Phase 1 governance standards:
-    - Document-independent rules: no client-specific or test-specific name lists or document tuning
-    - Lexical filters for English determiners, boilerplate clauses, public court venues, and field labels
-    - Structured UK PII regex patterns and format validation
-    - Statistical Named Entity Recognition via singleton spaCy en_core_web_sm
-    - Document-internal identity clustering and cross-referencing
-    - Algorithmic alias resolution linking honorifics, initials, surnames, and first names
-    """
-    def __init__(self):
+    def __init__(self) -> None:
         self.nlp = get_nlp()
 
+    # ------------------------------------------------------------------------------------------
     def detect(self, doc_ir: DocumentIR) -> DetectionResult:
-        raw_candidates: List[DetectedEntity] = []
-        block_texts: Dict[str, str] = {b.id: b.text for b in doc_ir.blocks if b.text}
+        blocks: Dict[str, str] = {b.id: b.text for b in doc_ir.blocks if b.text and b.text.strip()}
+        block_order = {bid: i for i, bid in enumerate(blocks)}
+        doc_lower_words = lowercase_words("\n".join(blocks.values()))
 
-        # Issue 11: Scan user-authored metadata items (Author, Title, Last Modified By, etc.)
-        # Exclude software tool metadata (Producer, Application, etc.)
-        user_meta_keys = {"author", "creator", "last_modified_by", "last_author", "title", "subject", "comments", "description"}
-        for meta in doc_ir.metadata:
-            if meta.key.lower() in user_meta_keys:
-                meta_val = (meta.value or "").strip()
-                if len(meta_val) >= 2:
-                    meta_block_id = f"meta_{meta.key}"
-                    block_texts[meta_block_id] = meta_val
+        public = self._public_spans(blocks)
+        ner_ids: Set[str] = set()
+        cands: List[DetectedEntity] = []
+        for bid, text in blocks.items():
+            cands += self._structured(bid, text)
+            cands += self._rule_based(bid, text, text)
+            if needs_caps_pass(text):
+                cands += [c for c in self._rule_based(bid, caps_normalised(text), text) if _has_caps_word(c.text)]
+        cands += self._ner(blocks, ner_ids, doc_lower_words)
 
-        # -------------------------------------------------------------------------
-        # Phase 1: Candidate Extraction across Blocks & Metadata
-        # (Placeholders are allocated post-clustering to prevent cross-type leakage)
-        # -------------------------------------------------------------------------
-        for b_id, text in block_texts.items():
-            if not text:
-                continue
+        cands = self._drop_public(cands, public, ner_ids)
+        parsed = self._reclassify_orgs_as_people(cands)
+        cands = self._drop_ordinary_words(cands, ner_ids, parsed, doc_lower_words, blocks)
 
-            # 1. Structured UK Patterns (NI, Sort Code, Account, Card, Postcode, Address, Email, Phone, etc.)
-            for p_name, p_info in PATTERNS.items():
-                regex = p_info["regex"]
-                for match in regex.finditer(text):
-                    if match.groups() and match.group(1):
-                        match_text = match.group(1)
-                        start = match.start(1)
-                        end = match.end(1)
-                    else:
-                        match_text = match.group()
-                        start = match.start()
-                        end = match.end()
+        clusters, assignment = self._cluster_people(cands, parsed, blocks)
+        alias_of: Dict[str, str] = {}
+        cands += self._defined_term_aliases(blocks, cands, assignment, alias_of)
+        cands += self._person_aliases(blocks, clusters, assignment)
+        cands += self._org_aliases(blocks, cands)
 
-                    conf = 1.0 if p_name in ("NI_NUMBER", "SORT_CODE", "ACCOUNT_NUMBER", "CREDIT_CARD", "UK_POSTCODE", "EMAIL", "DRIVING_LICENCE") else 0.95
-                    raw_candidates.append(DetectedEntity(
-                        id=f"ent_{uuid.uuid4().hex[:8]}",
-                        block_id=b_id,
-                        start=start,
-                        end=end,
-                        text=match_text,
-                        type=p_name,
-                        placeholder="",  # Assigned post-deduplication
-                        confidence=conf,
-                        is_active=True,
-                        canonical_id=None,
-                        surface_forms=[match_text],
-                        tier="confident"
-                    ))
+        kept = self._deduplicate_spans(cands, blocks)
+        self._allocate(kept, assignment, block_order, alias_of)
+        kept += self._propagate(kept, blocks, public)
+        self._surface_forms(kept, assignment)
 
-            # 2. Statutory Corporate & Banking Patterns (LLP, Ltd, PLC, Holdings, recognized banks)
-            for match in COMPANY_REGEX.finditer(text):
-                match_text = match.group().strip()
-                if "national insurance" not in match_text.lower():
-                    raw_candidates.append(DetectedEntity(
-                        id=f"ent_{uuid.uuid4().hex[:8]}",
-                        block_id=b_id,
-                        start=match.start(),
-                        end=match.end(),
-                        text=match_text,
-                        type="ORGANISATION",
-                        placeholder="",
-                        confidence=0.96,
-                        is_active=True,
-                        canonical_id=None,
-                        surface_forms=[match_text],
-                        tier="confident"
-                    ))
-
-            for match in BANK_REGEX.finditer(text):
-                match_text = match.group().strip()
-                raw_candidates.append(DetectedEntity(
-                    id=f"ent_{uuid.uuid4().hex[:8]}",
-                    block_id=b_id,
-                    start=match.start(),
-                    end=match.end(),
-                    text=match_text,
-                    type="ORGANISATION",
-                    placeholder="",
-                    confidence=0.96,
-                    is_active=True,
-                    canonical_id=None,
-                    surface_forms=[match_text],
-                    tier="confident"
-                ))
-
-            # 3. Person Titles & Honorifics (Mr., Mrs., Ms., Dr., Master Arthur Pendelton)
-            for match in PERSON_TITLES_REGEX.finditer(text):
-                match_text = match.group().strip()
-                raw_candidates.append(DetectedEntity(
-                    id=f"ent_{uuid.uuid4().hex[:8]}",
-                    block_id=b_id,
-                    start=match.start(),
-                    end=match.end(),
-                    text=match_text,
-                    type="PERSON",
-                    placeholder="",
-                    confidence=0.95,
-                    is_active=True,
-                    canonical_id=None,
-                    surface_forms=[match_text],
-                    tier="confident"
-                ))
-
-            # 4. Heading Person (e.g. "WITNESS STATEMENT OF MEENA PATEL")
-            for match in CAPS_HEADING_REGEX.finditer(text):
-                cand = match.group(1).strip()
-                raw_candidates.append(DetectedEntity(
-                    id=f"ent_{uuid.uuid4().hex[:8]}",
-                    block_id=b_id,
-                    start=match.start(1),
-                    end=match.end(1),
-                    text=cand,
-                    type="PERSON",
-                    placeholder="",
-                    confidence=0.95,
-                    is_active=True,
-                    canonical_id=None,
-                    surface_forms=[cand],
-                    tier="confident"
-                ))
-
-            # 5. Structural Role-based Person Introductions (e.g. "Employee: Marcus Sterling", "Marcus Sterling (Executive)")
-            # Issue 3: Marked uncertain (0.75) unless supported by spaCy model or explicit honorific
-            for match in ROLE_PREFIX_REGEX.finditer(text):
-                cand = match.group(1).strip()
-                words = [w.lower() for w in cand.split()]
-                if any(w in NON_PERSON_ROLE_WORDS for w in words):
-                    continue
-                raw_candidates.append(DetectedEntity(
-                    id=f"ent_{uuid.uuid4().hex[:8]}",
-                    block_id=b_id,
-                    start=match.start(1),
-                    end=match.end(1),
-                    text=cand,
-                    type="PERSON",
-                    placeholder="",
-                    confidence=0.75,
-                    is_active=True,
-                    canonical_id=None,
-                    surface_forms=[cand],
-                    tier="uncertain"
-                ))
-
-            for match in PARENTHETICAL_ROLE_REGEX.finditer(text):
-                cand = match.group(1).strip()
-                words = [w.lower() for w in cand.split()]
-                if any(w in NON_PERSON_ROLE_WORDS for w in words):
-                    continue
-                raw_candidates.append(DetectedEntity(
-                    id=f"ent_{uuid.uuid4().hex[:8]}",
-                    block_id=b_id,
-                    start=match.start(1),
-                    end=match.end(1),
-                    text=cand,
-                    type="PERSON",
-                    placeholder="",
-                    confidence=0.90,
-                    is_active=True,
-                    canonical_id=None,
-                    surface_forms=[cand],
-                    tier="confident"
-                ))
-
-        # 6. Statistical Named Entity Recognition via singleton spaCy (nlp.pipe across blocks & metadata)
-        valid_blocks = [(b_id, txt) for b_id, txt in block_texts.items() if txt and txt.strip()]
-        if valid_blocks:
-            block_texts_list = [txt for _, txt in valid_blocks]
-            spacy_docs = list(self.nlp.pipe(block_texts_list, batch_size=16))
-
-            for (b_id, original_text), spacy_doc in zip(valid_blocks, spacy_docs):
-                for ent in spacy_doc.ents:
-                    raw_ent_text = ent.text
-
-                    # Issue 5: Split entities spanning newlines before using them
-                    if "\n" in raw_ent_text or "\r" in raw_ent_text:
-                        segments: List[Tuple[str, int]] = []
-                        cur = 0
-                        for line in raw_ent_text.splitlines(keepends=True):
-                            line_stripped = line.strip()
-                            if line_stripped:
-                                line_offset = raw_ent_text.find(line, cur)
-                                if line_offset != -1:
-                                    cur = line_offset + len(line)
-                                    segments.append((line, ent.start_char + line_offset))
-                    else:
-                        segments = [(raw_ent_text, ent.start_char)]
-
-                    for seg_text, seg_base_start in segments:
-                        clean_et = re.sub(r"\s*\([^)]*\)?", "", seg_text).strip()
-                        # Strip leading or trailing bullets, dashes, bars, colons, or whitespace
-                        clean_et = re.sub(r"^[•\-\*\s|:]+|[•\-\*\s|:]+$", "", clean_et).strip()
-                        if not clean_et or len(clean_et) < 2 or re.match(r"^[\d\.\s\-_/]+$", clean_et) or re.match(r"^\d+\.\d+", clean_et):
-                            continue
-
-                        et_lower = clean_et.lower()
-                        # Skip document titles, attendance note headers, table row markers, contact field labels
-                        if et_lower in ("attendance note", "tel", "telephone", "email", "phone", "mob", "mobile", "row", "ledger row"):
-                            continue
-
-                        # Filter out public judicial venues (Courts) and contract boilerplate clauses
-                        if any(v in et_lower for v in PUBLIC_VENUES_OR_CLAUSES):
-                            continue
-
-                        # Issue 6: Accurate offset calculation based on position of clean_et inside seg_text
-                        char_pos = seg_text.find(clean_et)
-                        exact_start = seg_base_start + (char_pos if char_pos != -1 else 0)
-                        exact_end = exact_start + len(clean_et)
-
-                        if ent.label_ == "PERSON":
-                            # Filter all-caps section titles or acronyms with mathematical symbols
-                            if clean_et.isupper() and any(w in et_lower for w in ("agreement", "memorandum", "obligations", "schedule")):
-                                continue
-                            if "+" in clean_et or (clean_et.isupper() and len(clean_et) <= 3):
-                                continue
-                            if len(clean_et) <= 3 and et_lower in ("the", "this", "that", "and", "for", "with", "from", "each", "both", "such", "said", "all", "order", "court"):
-                                continue
-
-                            words = clean_et.split()
-                            is_full_name = len(words) >= 2
-                            conf = 0.92 if is_full_name else 0.70
-                            tier = "confident" if is_full_name else "uncertain"
-
-                            raw_candidates.append(DetectedEntity(
-                                id=f"ent_{uuid.uuid4().hex[:8]}",
-                                block_id=b_id,
-                                start=exact_start,
-                                end=exact_end,
-                                text=clean_et,
-                                type="PERSON",
-                                placeholder="",
-                                confidence=conf,
-                                is_active=True,
-                                canonical_id=None,
-                                surface_forms=[clean_et],
-                                tier=tier
-                            ))
-
-                        elif ent.label_ in ("ORG", "FAC"):
-                            # Exclude road/street addresses from becoming ORGs
-                            if any(et_lower.endswith(sfx) for sfx in STREET_SUFFIXES):
-                                continue
-                            if "national insurance" in et_lower:
-                                continue
-                            if et_lower in ("party", "parties", "notice", "claimant", "respondent", "agreement", "severability", "jurisdiction", "executive"):
-                                continue
-                            if clean_et.isupper() and any(w in et_lower for w in ("memorandum", "obligations", "compliance", "settlement", "agreement")):
-                                continue
-
-                            words = clean_et.split()
-                            first_word = words[0].strip(".,")
-                            has_org_word = any(ind in et_lower for ind in ORG_INDICATORS)
-                            is_titled_person = first_word.lower() in TITLE_GENDER_MAP
-                            is_celtic_prefix = bool(re.match(r"^(?:O'|Mc|Mac)[A-Z][a-z]+", words[-1])) if len(words) in (2, 3) else False
-
-                            # Reclassify to PERSON if spaCy mislabelled an entity with a person title or Celtic surname prefix
-                            if is_titled_person or is_celtic_prefix:
-                                raw_candidates.append(DetectedEntity(
-                                    id=f"ent_{uuid.uuid4().hex[:8]}",
-                                    block_id=b_id,
-                                    start=exact_start,
-                                    end=exact_end,
-                                    text=clean_et,
-                                    type="PERSON",
-                                    placeholder="",
-                                    confidence=0.95 if is_titled_person else 0.90,
-                                    is_active=True,
-                                    canonical_id=None,
-                                    surface_forms=[clean_et],
-                                    tier="confident"
-                                ))
-                            elif has_org_word:
-                                raw_candidates.append(DetectedEntity(
-                                    id=f"ent_{uuid.uuid4().hex[:8]}",
-                                    block_id=b_id,
-                                    start=exact_start,
-                                    end=exact_end,
-                                    text=clean_et,
-                                    type="ORGANISATION",
-                                    placeholder="",
-                                    confidence=0.90,
-                                    is_active=True,
-                                    canonical_id=None,
-                                    surface_forms=[clean_et],
-                                    tier="confident"
-                                ))
-                            else:
-                                # Issue 4: Organisations without an indicator word retained as uncertain instead of being dropped
-                                raw_candidates.append(DetectedEntity(
-                                    id=f"ent_{uuid.uuid4().hex[:8]}",
-                                    block_id=b_id,
-                                    start=exact_start,
-                                    end=exact_end,
-                                    text=clean_et,
-                                    type="ORGANISATION",
-                                    placeholder="",
-                                    confidence=0.75,
-                                    is_active=True,
-                                    canonical_id=None,
-                                    surface_forms=[clean_et],
-                                    tier="uncertain"
-                                ))
-
-        # -------------------------------------------------------------------------
-        # Phase 2: Document-Internal Cross-Referencing & Reclassification
-        # Issue 2: Dropped first-name cross-referencing so "Morgan Stanley", "John Lewis"
-        # and "Marks & Spencer" are NEVER converted to people based on first name alone!
-        # -------------------------------------------------------------------------
-        person_candidates = [e for e in raw_candidates if e.type == "PERSON"]
-        parsed_mentions: Dict[str, ParsedPersonMention] = {}
-        for cand in person_candidates:
-            parsed_mentions[cand.id] = parse_person_tokens(cand.text)
-
-        doc_confirmed_surnames: Set[str] = set()
-        for cand in person_candidates:
-            p = parsed_mentions[cand.id]
-            if p.surname and len(p.surname) >= 3 and (p.is_full_name or p.honorific):
-                doc_confirmed_surnames.add(p.surname.lower())
-
-        for e in raw_candidates:
-            if e.type == "ORGANISATION" and not any(ind in e.text.lower() for ind in ORG_INDICATORS):
-                p_cand = parse_person_tokens(e.text)
-                is_surname_match = bool(p_cand.surname and p_cand.surname.lower() in doc_confirmed_surnames)
-                if p_cand.honorific or is_surname_match:
-                    e.type = "PERSON"
-                    parsed_mentions[e.id] = p_cand
-                    if e not in person_candidates:
-                        person_candidates.append(e)
-
-        # -------------------------------------------------------------------------
-        # Phase 3: Post-Collection Identity Clustering for PERSON Entities
-        # Resolves Issue 1, 3, 6, 7 (shared surnames, Mrs Patel, initial matching)
-        # -------------------------------------------------------------------------
-        candidates_by_surname: Dict[str, List[DetectedEntity]] = {}
-        for cand in person_candidates:
-            p = parsed_mentions[cand.id]
-            sname_key = (p.surname or p.clean_name).lower()
-            candidates_by_surname.setdefault(sname_key, []).append(cand)
-
-        person_clusters: List[PersonCluster] = []
-        cluster_assignment: Dict[str, PersonCluster] = {}
-        ambiguous_person_entities: List[DetectedEntity] = []
-
-        for sname_key, cand_list in candidates_by_surname.items():
-            full_name_groups: Dict[str, List[DetectedEntity]] = {}
-            titled_only_groups: Dict[str, List[DetectedEntity]] = {}
-            bare_mentions: List[DetectedEntity] = []
-
-            for cand in cand_list:
-                p = parsed_mentions[cand.id]
-                if p.is_full_name and p.first_name:
-                    fname_key = p.first_name.lower()
-                    full_name_groups.setdefault(fname_key, []).append(cand)
-                elif p.honorific:
-                    titled_only_groups.setdefault(p.honorific.lower(), []).append(cand)
-                else:
-                    bare_mentions.append(cand)
-
-            if full_name_groups:
-                created_clusters_for_surname: List[PersonCluster] = []
-                for fname_key, group_ents in full_name_groups.items():
-                    canonical_text = max(group_ents, key=lambda x: len(x.text)).text
-                    first_parsed = parsed_mentions[group_ents[0].id]
-                    gender = "U"
-                    for ge in group_ents:
-                        g_parsed = parsed_mentions[ge.id]
-                        if g_parsed.gender != "U":
-                            gender = g_parsed.gender
-                            break
-
-                    initials = {first_parsed.initial} if first_parsed.initial else set()
-                    cluster = PersonCluster(
-                        cluster_id=f"cluster_{sname_key}_{fname_key}",
-                        canonical_name=canonical_text,
-                        surname=first_parsed.surname or sname_key,
-                        first_name=first_parsed.first_name,
-                        middle_tokens=first_parsed.middle_tokens,
-                        initials=initials,
-                        gender=gender,
-                        confidence=max(e.confidence for e in group_ents),
-                        tier="confident",
-                        entities=list(group_ents)
-                    )
-                    person_clusters.append(cluster)
-                    created_clusters_for_surname.append(cluster)
-                    for ge in group_ents:
-                        cluster_assignment[ge.id] = cluster
-
-                # Assign titled mentions
-                # Issue 6: If "Mrs Patel" is ambiguous between Meena and Priya, mark uncertain (do not create confident third person)
-                for title_key, titled_ents in titled_only_groups.items():
-                    title_gender = TITLE_GENDER_MAP.get(title_key, "U")
-                    compatible_clusters = [
-                        c for c in created_clusters_for_surname
-                        if title_gender == "U" or c.gender == "U" or c.gender == title_gender
-                    ]
-                    if len(compatible_clusters) == 1:
-                        target_cluster = compatible_clusters[0]
-                        if title_gender != "U" and target_cluster.gender == "U":
-                            target_cluster.gender = title_gender
-                        for te in titled_ents:
-                            cluster_assignment[te.id] = target_cluster
-                            target_cluster.entities.append(te)
-                    else:
-                        # Ambiguous titled mention (e.g. Mrs Patel between Meena and Priya)
-                        for te in titled_ents:
-                            te.tier = "uncertain"
-                            te.confidence = 0.70
-                            ambiguous_person_entities.append(te)
-
-                # Assign bare mentions or initial mentions (Issue 7: P. Smith matches Peter Smith)
-                for be in bare_mentions:
-                    be_parsed = parsed_mentions[be.id]
-                    if be_parsed.initial:
-                        matching_initial_clusters = [
-                            c for c in created_clusters_for_surname
-                            if c.initials and be_parsed.initial in c.initials
-                        ]
-                        if len(matching_initial_clusters) == 1:
-                            target_cluster = matching_initial_clusters[0]
-                            cluster_assignment[be.id] = target_cluster
-                            target_cluster.entities.append(be)
-                            continue
-
-                    if len(created_clusters_for_surname) == 1:
-                        single_cluster = created_clusters_for_surname[0]
-                        cluster_assignment[be.id] = single_cluster
-                        single_cluster.entities.append(be)
-                    else:
-                        be.tier = "uncertain"
-                        be.confidence = 0.70
-                        ambiguous_person_entities.append(be)
-
-            elif titled_only_groups:
-                created_clusters_for_surname = []
-                genders_present = {TITLE_GENDER_MAP.get(tk, "U") for tk in titled_only_groups.keys()} - {"U"}
-                if len(genders_present) <= 1:
-                    all_titled_ents = [e for group in titled_only_groups.values() for e in group]
-                    canonical_text = max(all_titled_ents, key=lambda x: len(x.text)).text
-                    t_parsed = parsed_mentions[all_titled_ents[0].id]
-                    gender = list(genders_present)[0] if genders_present else "U"
-                    cluster = PersonCluster(
-                        cluster_id=f"cluster_{sname_key}_titled",
-                        canonical_name=canonical_text,
-                        surname=t_parsed.surname or sname_key,
-                        gender=gender,
-                        confidence=0.95,
-                        tier="confident",
-                        entities=list(all_titled_ents)
-                    )
-                    person_clusters.append(cluster)
-                    created_clusters_for_surname.append(cluster)
-                    for te in all_titled_ents:
-                        cluster_assignment[te.id] = cluster
-                else:
-                    for title_key, titled_ents in titled_only_groups.items():
-                        canonical_text = max(titled_ents, key=lambda x: len(x.text)).text
-                        t_parsed = parsed_mentions[titled_ents[0].id]
-                        cluster = PersonCluster(
-                            cluster_id=f"cluster_{sname_key}_{title_key}",
-                            canonical_name=canonical_text,
-                            surname=t_parsed.surname or sname_key,
-                            gender=TITLE_GENDER_MAP.get(title_key, "U"),
-                            confidence=0.95,
-                            tier="confident",
-                            entities=list(titled_ents)
-                        )
-                        person_clusters.append(cluster)
-                        created_clusters_for_surname.append(cluster)
-                        for te in titled_ents:
-                            cluster_assignment[te.id] = cluster
-
-                if len(created_clusters_for_surname) == 1:
-                    single_cluster = created_clusters_for_surname[0]
-                    for be in bare_mentions:
-                        cluster_assignment[be.id] = single_cluster
-                        single_cluster.entities.append(be)
-                else:
-                    for be in bare_mentions:
-                        be.tier = "uncertain"
-                        be.confidence = 0.70
-                        ambiguous_person_entities.append(be)
-
-            else:
-                all_bare = bare_mentions
-                canonical_text = max(all_bare, key=lambda x: len(x.text)).text
-                b_parsed = parsed_mentions[all_bare[0].id]
-                cluster = PersonCluster(
-                    cluster_id=f"cluster_{sname_key}_bare",
-                    canonical_name=canonical_text,
-                    surname=b_parsed.surname or sname_key,
-                    gender="U",
-                    confidence=max(e.confidence for e in all_bare),
-                    tier="confident" if any(e.tier == "confident" for e in all_bare) else "uncertain",
-                    entities=list(all_bare)
-                )
-                person_clusters.append(cluster)
-                for be in all_bare:
-                    cluster_assignment[be.id] = cluster
-
-        # -------------------------------------------------------------------------
-        # Phase 4: Algorithmic Alias Resolution (Surnames, First Names, Org Stems)
-        # Resolves Issue 2, 5, 8 (Halden stem, first names share person placeholder)
-        # -------------------------------------------------------------------------
-        surname_counts: Dict[str, int] = {}
-        for cl in person_clusters:
-            if cl.surname:
-                surname_counts[cl.surname.lower()] = surname_counts.get(cl.surname.lower(), 0) + 1
-
-        first_name_counts: Dict[str, int] = {}
-        for cl in person_clusters:
-            if cl.first_name:
-                first_name_counts[cl.first_name.lower()] = first_name_counts.get(cl.first_name.lower(), 0) + 1
-
-        alias_candidates: List[DetectedEntity] = []
-
-        # 1. Person Surnames and Titles
-        for cl in person_clusters:
-            if cl.tier != "confident" or not cl.surname or len(cl.surname) < 3:
-                continue
-
-            sname = cl.surname
-            sname_cap = sname[0].upper() + sname[1:]
-            is_shared_surname = surname_counts.get(sname.lower(), 0) > 1
-
-            prefixes = [
-                r"(?:Mr|Mrs|Ms|Miss|Dr|Prof|Lord|Lady|Sir|Master|Dame)\.?\s+",
-                r"[A-Z]\.\s*",
-                r"[A-Z]\s+"
-            ]
-            if cl.first_name:
-                fname_cap = cl.first_name[0].upper() + cl.first_name[1:]
-                prefixes.append(rf"{re.escape(fname_cap)}\s+")
-
-            prefix_group = f"(?:{'|'.join(prefixes)})"
-            alias_pattern = re.compile(rf"\b(?:{prefix_group})?{re.escape(sname_cap)}\b")
-
-            for b_id, b_text in block_texts.items():
-                for match in alias_pattern.finditer(b_text):
-                    m_text = match.group()
-                    m_parsed = parse_person_tokens(m_text)
-
-                    # Check if ambiguous when surname is shared
-                    is_ambiguous_shared = False
-                    target_cl = cl
-                    if is_shared_surname:
-                        if not m_parsed.is_full_name and not m_parsed.first_name:
-                            matching_unique = None
-                            if m_parsed.honorific:
-                                t_gender = TITLE_GENDER_MAP.get(m_parsed.honorific.lower(), "U")
-                                matching = [
-                                    c for c in person_clusters
-                                    if c.surname.lower() == sname.lower()
-                                    and (c.gender == t_gender if t_gender != "U" and c.gender != "U" else False)
-                                ]
-                                if len(matching) == 1:
-                                    matching_unique = matching[0]
-                                    target_cl = matching_unique
-
-                            if not matching_unique:
-                                is_ambiguous_shared = True
-
-                    if is_ambiguous_shared:
-                        ent = DetectedEntity(
-                            id=f"ent_{uuid.uuid4().hex[:8]}",
-                            block_id=b_id,
-                            start=match.start(),
-                            end=match.end(),
-                            text=m_text,
-                            type="PERSON",
-                            placeholder="",
-                            confidence=0.70,
-                            is_active=True,
-                            canonical_id=None,
-                            surface_forms=[m_text, sname_cap],
-                            tier="uncertain"
-                        )
-                        alias_candidates.append(ent)
-                        ambiguous_person_entities.append(ent)
-                    else:
-                        ent = DetectedEntity(
-                            id=f"ent_{uuid.uuid4().hex[:8]}",
-                            block_id=b_id,
-                            start=match.start(),
-                            end=match.end(),
-                            text=m_text,
-                            type="PERSON",
-                            placeholder="",
-                            confidence=min(0.90, target_cl.confidence),
-                            is_active=True,
-                            canonical_id=None,
-                            surface_forms=[m_text, sname_cap],
-                            tier=target_cl.tier
-                        )
-                        alias_candidates.append(ent)
-                        cluster_assignment[ent.id] = target_cl
-                        target_cl.entities.append(ent)
-
-            # Issue 5: First names alone share established person's placeholder (tier: uncertain)
-            if cl.tier == "confident" and cl.first_name and len(cl.first_name) >= 3:
-                fname_lower = cl.first_name.lower()
-                if fname_lower not in {"the", "this", "that", "said", "such", "each", "both", "all", "order", "court", "claimant", "defendant", "respondent"}:
-                    if first_name_counts.get(fname_lower, 0) == 1:
-                        fname_cap = cl.first_name[0].upper() + cl.first_name[1:]
-                        fname_regex = re.compile(rf"\b{re.escape(fname_cap)}\b")
-                        for b_id, b_text in block_texts.items():
-                            for match in fname_regex.finditer(b_text):
-                                m_text = match.group()
-                                ent = DetectedEntity(
-                                    id=f"ent_{uuid.uuid4().hex[:8]}",
-                                    block_id=b_id,
-                                    start=match.start(),
-                                    end=match.end(),
-                                    text=m_text,
-                                    type="PERSON",
-                                    placeholder="",
-                                    confidence=0.75,
-                                    is_active=True,
-                                    canonical_id=None,
-                                    surface_forms=[m_text],
-                                    tier="uncertain"
-                                )
-                                alias_candidates.append(ent)
-                                cluster_assignment[ent.id] = cl
-                                cl.entities.append(ent)
-
-        # 2. Issue 8: Organisation Stems (e.g. "Halden" after "Halden Logistics")
-        org_entities = [e for e in raw_candidates if e.type == "ORGANISATION"]
-        org_stems: Dict[str, str] = {}
-        for org in org_entities:
-            stem = extract_org_stem(org.text)
-            if stem != org.text and len(stem) >= 3:
-                org_stems[stem.lower()] = stem
-
-        for stem_lower, stem_clean in org_stems.items():
-            stem_regex = re.compile(rf"\b{re.escape(stem_clean)}\b")
-            for b_id, b_text in block_texts.items():
-                for match in stem_regex.finditer(b_text):
-                    m_text = match.group()
-                    alias_candidates.append(DetectedEntity(
-                        id=f"ent_{uuid.uuid4().hex[:8]}",
-                        block_id=b_id,
-                        start=match.start(),
-                        end=match.end(),
-                        text=m_text,
-                        type="ORGANISATION",
-                        placeholder="",
-                        confidence=0.85,
-                        is_active=True,
-                        canonical_id=None,
-                        surface_forms=[m_text],
-                        tier="uncertain"
-                    ))
-
-        all_candidates = raw_candidates + alias_candidates
-
-        # -------------------------------------------------------------------------
-        # Phase 5: Span Deduplication & Structured Pattern Protection
-        # Issue 9: Structured patterns (DOB, NI, Sort Code, etc.) CANNOT be swallowed
-        # by uncertain spans!
-        # -------------------------------------------------------------------------
-        deduped = self._deduplicate_spans(all_candidates, block_texts)
-
-        # -------------------------------------------------------------------------
-        # Phase 6: Late Placeholder & Canonical ID Allocation
-        # Issue 1: Type is part of registry key; allocated only after clustering
-        # so Marcus Sterling (Executive) gets [PERSON 1] and never [ORG 1].
-        # -------------------------------------------------------------------------
-        registry = EntityRegistry()
-
-        # 1. Allocate for PersonClusters
-        for cl in person_clusters:
-            canon_id, placeholder = registry.allocate("PERSON", cl.canonical_name)
-            cl.canonical_id = canon_id
-            cl.placeholder = placeholder
-            for ent in cl.entities:
-                ent.canonical_id = canon_id
-                ent.placeholder = placeholder
-
-        # 2. Allocate for remaining kept entities
-        for ent in deduped:
-            if ent.placeholder and ent.canonical_id:
-                continue
-
-            if ent.type == "PERSON":
-                if ent.id in cluster_assignment:
-                    cl = cluster_assignment[ent.id]
-                    ent.canonical_id = cl.canonical_id
-                    ent.placeholder = cl.placeholder
-                else:
-                    canon_id, placeholder = registry.allocate("PERSON", ent.text)
-                    ent.canonical_id = canon_id
-                    ent.placeholder = placeholder
-            elif ent.type == "ORGANISATION":
-                stem = extract_org_stem(ent.text)
-                canon_id, placeholder = registry.allocate("ORGANISATION", stem)
-                ent.canonical_id = canon_id
-                ent.placeholder = placeholder
-            else:
-                canon_id, placeholder = registry.allocate(ent.type, ent.text)
-                ent.canonical_id = canon_id
-                ent.placeholder = placeholder
-
-        # -------------------------------------------------------------------------
-        # Phase 7: Surface Forms Harmonization
-        # Issue 8: Adds stem to organisation surface forms; adds first name to PERSON
-        # -------------------------------------------------------------------------
-        for ent in deduped:
-            if not ent.surface_forms:
-                ent.surface_forms = [ent.text]
-
-            if ent.type == "PERSON":
-                parsed = parse_person_tokens(ent.text)
-                if parsed.surname and len(parsed.surname) >= 3:
-                    surname = parsed.surname
-                    if surname not in ent.surface_forms:
-                        ent.surface_forms.append(surname)
-                    for t in ("Mr", "Mr.", "Mrs", "Mrs.", "Ms", "Ms.", "Dr", "Dr."):
-                        ent.surface_forms.append(f"{t} {surname}")
-                    if parsed.first_name and len(parsed.first_name) >= 3:
-                        if parsed.first_name not in ent.surface_forms:
-                            ent.surface_forms.append(parsed.first_name)
-                        initial = parsed.first_name[0]
-                        ent.surface_forms.append(f"{initial}. {surname}")
-                        ent.surface_forms.append(f"{initial}.{surname}")
-                        ent.surface_forms.append(f"{initial} {surname}")
-                        ent.surface_forms.append(f"{parsed.first_name} {surname}")
-                    if parsed.middle_tokens and parsed.first_name:
-                        mid_initial = parsed.middle_tokens[0][0]
-                        ent.surface_forms.append(f"{parsed.first_name[0]}. {mid_initial}. {surname}")
-                        ent.surface_forms.append(f"{parsed.first_name[0]}.{mid_initial}. {surname}")
-
-            elif ent.type == "ORGANISATION":
-                stem = extract_org_stem(ent.text)
-                if stem != ent.text and len(stem) >= 3 and stem not in ent.surface_forms:
-                    ent.surface_forms.append(stem)
-
-            ent.surface_forms = list(dict.fromkeys(ent.surface_forms))
-
+        kept.sort(key=lambda e: (block_order.get(e.block_id, 0), e.start))
         counts: Dict[str, int] = {}
-        for ent in deduped:
-            counts[ent.type] = counts.get(ent.type, 0) + 1
+        for e in kept:
+            counts[e.type] = counts.get(e.type, 0) + 1
+        return DetectionResult(doc_id=doc_ir.doc_id, entities=kept, total_entities=len(kept), entities_by_type=counts)
 
-        return DetectionResult(
-            doc_id=doc_ir.doc_id,
-            entities=deduped,
-            total_entities=len(deduped),
-            entities_by_type=counts
-        )
+    # ------------------------------------------------------------------------------------------
+    # 1. Public spans
+    # ------------------------------------------------------------------------------------------
+    def _public_spans(self, blocks: Dict[str, str]) -> Dict[str, List[Tuple[int, int]]]:
+        glossed: Set[str] = set()
+        for text in blocks.values():
+            for m in GLOSSED_PUBLIC_BODY_REGEX.finditer(text):
+                for name in (m.group(1), m.group(2)):               # the body and its English gloss
+                    name = re.sub(r"(?i)^the\s+", "", name).strip()
+                    if len(name) >= 3:
+                        glossed.add(name)
+        spans: Dict[str, List[Tuple[int, int]]] = {}
+        for bid, text in blocks.items():
+            s = [m.span() for rx in (PUBLIC_LEGAL_REFERENCE_REGEX, PUBLIC_INSTITUTION_REGEX) for m in rx.finditer(text)]
+            s += [m.span(g) for m in CITED_CASE_NAME_REGEX.finditer(text) for g in (1, 2) if m.group(g)]
+            for name in glossed:
+                s += [m.span() for m in re.finditer(rf"(?<!\w){re.escape(name)}(?!\w)", text)]
+            if s:
+                spans[bid] = s
+        return spans
 
-    def _deduplicate_spans(
-        self,
-        entities: List[DetectedEntity],
-        block_texts: Dict[str, str]
-    ) -> List[DetectedEntity]:
+    # ------------------------------------------------------------------------------------------
+    # 2. Candidates
+    # ------------------------------------------------------------------------------------------
+    def _structured(self, bid: str, text: str) -> List[DetectedEntity]:
+        out = []
+        for p_name, p in PATTERNS.items():
+            for m in p["regex"].finditer(text):
+                g = next((i for i in range(1, (p["regex"].groups or 0) + 1) if m.group(i)), 0)
+                s, e = m.span(g)
+                value = text[s:e]
+                if p.get("validate") and not p["validate"](value):
+                    continue
+                out.append(_entity(bid, s, e, value, p_name, 1.0 if p_name in STRUCTURED_CONFIDENCE_1 else 0.95))
+        return out
+
+    def _rule_based(self, bid: str, text: str, original: str) -> List[DetectedEntity]:
+        """Rule-based names/organisations on `text`; spans and values are taken from `original`."""
+        out: List[DetectedEntity] = []
+
+        def add(s: int, e: int, type_: str, conf: float, tier: str = "confident") -> None:
+            value = _strip_possessive(original[s:e].strip())
+            if value:
+                out.append(_entity(bid, s, s + len(value), value, type_, conf, tier))
+
+        for m in COMPANY_REGEX.finditer(text):
+            if "national insurance" not in m.group().lower():
+                add(m.start(), m.end(), "ORGANISATION", 0.96)
+        for m in BANK_REGEX.finditer(text):
+            add(m.start(), m.end(), "ORGANISATION", 0.96)
+        for m in PERSON_TITLES_REGEX.finditer(text):
+            add(m.start(), m.end(), "PERSON", 0.95)
+        for m in LATE_PERSON_REGEX.finditer(text):
+            add(m.start(1), m.end(1), "PERSON", 0.95)
+        for m in PARTICLE_NAME_REGEX.finditer(text):
+            if not PUBLIC_VENUE_OR_CLAUSE.search(m.group()):
+                add(m.start(), m.end(), "PERSON", 0.92)
+        for m in CAPS_HEADING_REGEX.finditer(original):
+            add(m.start(1), m.end(1), "PERSON", 0.95)
+        for m in SURNAME_FIRST_REGEX.finditer(original):
+            add(m.start(), m.end(), "PERSON", 0.90)
+        for m in ROLE_PREFIX_REGEX.finditer(text):
+            if not any(w.lower() in NON_PERSON_ROLE_WORDS for w in m.group(1).split()):
+                add(m.start(1), m.end(1), "PERSON", 0.75, "uncertain")
+        for m in PARENTHETICAL_ROLE_REGEX.finditer(text):
+            if not any(w.lower() in NON_PERSON_ROLE_WORDS for w in m.group(1).split()):
+                add(m.start(1), m.end(1), "PERSON", 0.90)
+        return out
+
+    def _ner(self, blocks: Dict[str, str], ner_ids: Set[str], doc_lower_words: Set[str]) -> List[DetectedEntity]:
+        """spaCy over every block, plus a normal-case reading of blocks that contain capitals."""
+        items = list(blocks.items())
+        caps_items = [(bid, t) for bid, t in items if needs_caps_pass(t)]
+        docs = list(self.nlp.pipe([t for _, t in items] + [caps_normalised(t) for _, t in caps_items], batch_size=16))
+        out: List[DetectedEntity] = []
+        postcodes = {bid: [m.span() for m in PATTERNS["UK_POSTCODE"]["regex"].finditer(t)] for bid, t in items}
+
+        for idx, ((bid, original), doc) in enumerate(zip(items + caps_items, docs)):
+            from_caps_pass = idx >= len(items)
+            for ent in doc.ents:
+                if from_caps_pass and ent.label_ != "PERSON":
+                    continue
+                for seg_text, seg_start in self._split_lines(original[ent.start_char:ent.end_char], ent.start_char):
+                    clean = re.sub(r"\s*\([^)]*\)?", "", seg_text)
+                    clean = re.sub(r"^[•\-\*\s|:]+|[•\-\*\s|:]+$", "", clean).strip()
+                    if len(clean) < 2 or re.fullmatch(r"[\d.\s\-_/]+", clean) or re.match(r"^\d+\.\d+", clean):
+                        continue
+                    low = clean.lower()
+                    if all(w in LABEL_WORDS for w in re.findall(r"[\w.-]+", low)) or PUBLIC_VENUE_OR_CLAUSE.search(clean):
+                        continue
+                    clean = _strip_possessive(clean)
+                    pos = seg_text.find(clean)
+                    s = seg_start + (pos if pos != -1 else 0)
+                    e = s + len(clean)
+
+                    cand: Optional[DetectedEntity] = None
+                    if any(_overlaps((s, e), pc) for pc in postcodes.get(bid, [])) and not has_org_indicator(clean):
+                        continue                              # "Leicester LE2 7QP" / "Manchester M60" end an address; not a name
+                    if ent.label_ == "PERSON":
+                        if "+" in clean or (clean.isupper() and len(clean) <= 3):
+                            continue
+                        if re.search(r"(?i)\s(?:v|vs|and|&)\.?\s", f" {clean} "):
+                            continue                          # "John v PATEL" spans two parties
+                        if "," in clean and not SURNAME_FIRST_REGEX.fullmatch(clean):
+                            continue
+                        if from_caps_pass:
+                            # Capitals read in normal case: only full names whose words are not
+                            # ordinary words of this document ("WITNESS STATEMENT" is not a person).
+                            words = [w for w in re.findall(r"[^\W\d_]+", clean) if len(w) >= 3 and w.lower() not in FUNCTION_WORDS]
+                            if len(clean.split()) < 2 or not _has_caps_word(clean) or not words \
+                                    or all(w.lower() in doc_lower_words or w.lower() in LABEL_WORDS for w in words):
+                                continue
+                        full = len(clean.split()) >= 2
+                        cand = _entity(bid, s, e, clean, "PERSON", 0.92 if full else 0.70, "confident" if full else "uncertain")
+                    elif ent.label_ in ("ORG", "FAC"):
+                        if STREET_SUFFIX.search(clean) or "national insurance" in low:
+                            continue
+                        if re.match(r"^(?:Gmail|Outlook|Yahoo(?:\s+Mail)?|Apple\s+Mail|Thunderbird|Webmail)\s*[-–—]", clean, re.IGNORECASE):
+                            continue
+                        if clean.isupper() and re.search(r"memorandum|obligations|compliance|settlement|agreement", low):
+                            continue
+                        words = clean.split()
+                        titled = words[0].strip(".,").lower() in TITLE_GENDER
+                        celtic = len(words) in (2, 3) and bool(re.match(r"^(?:O'|Mc|Mac)[A-Z][a-z]+", words[-1]))
+                        if titled or celtic:
+                            cand = _entity(bid, s, e, clean, "PERSON", 0.95 if titled else 0.90)
+                        elif has_org_indicator(clean):
+                            cand = _entity(bid, s, e, clean, "ORGANISATION", 0.90)
+                        else:
+                            cand = _entity(bid, s, e, clean, "ORGANISATION", 0.75, "uncertain")
+                    if cand:
+                        ner_ids.add(cand.id)
+                        out.append(cand)
+        return out
+
+    @staticmethod
+    def _split_lines(text: str, base: int) -> List[Tuple[str, int]]:
+        if "\n" not in text and "\r" not in text:
+            return [(text, base)]
+        out, cur = [], 0
+        for line in text.splitlines(keepends=True):
+            if line.strip():
+                off = text.find(line, cur)
+                if off != -1:
+                    cur = off + len(line)
+                    out.append((line, base + off))
+        return out
+
+    # ------------------------------------------------------------------------------------------
+    # 3. Evidence filters
+    # ------------------------------------------------------------------------------------------
+    @staticmethod
+    def _drop_public(cands: List[DetectedEntity], public: Dict[str, List[Tuple[int, int]]], ner_ids: Set[str]) -> List[DetectedEntity]:
         """
-        Deduplicates and merges overlapping spans within each block.
-        Issue 9: Structured patterns (DOB, NI, Sort Code, etc.) are strictly protected
-        and CANNOT be swallowed or overridden by uncertain spans!
+        NER guesses and organisation patterns that touch a public legal reference are dropped
+        ('EC' inside 'Directive 95/46/EC'). Structured values are never dropped. Rule-based person
+        matches (honorifics, roles) are dropped only when wholly inside a public span.
         """
-        blocks_map: Dict[str, List[DetectedEntity]] = {}
+        kept = []
+        for c in cands:
+            spans = public.get(c.block_id, [])
+            if not spans or c.type in PATTERNS:
+                kept.append(c)
+                continue
+            if c.id in ner_ids or c.type == "ORGANISATION":
+                if any(_overlaps((c.start, c.end), s) for s in spans):
+                    continue
+            elif any(s[0] <= c.start and c.end <= s[1] for s in spans):
+                continue
+            kept.append(c)
+        return kept
+
+    @staticmethod
+    def _reclassify_orgs_as_people(cands: List[DetectedEntity]) -> Dict[str, PersonName]:
+        """
+        spaCy often labels people as ORG. An ORG without an organisation word becomes a PERSON
+        if it carries an honorific, ends in a surname confirmed elsewhere in the document, or
+        matches a confirmed person's first name.
+        """
+        parsed = {c.id: parse_person(c.text) for c in cands if c.type == "PERSON"}
+        confirmed = {p.surname.lower() for p in parsed.values()
+                     if p.surname and len(p.surname) >= 3 and (p.is_full or p.honorific)}
+        first_names = {p.first.lower() for p in parsed.values() if p.is_full and p.first and len(p.first) >= 3}
+        full_names = {p.clean.lower() for p in parsed.values() if p.is_full}
+        for c in cands:
+            # "Oluwaseun Adeyemi of Flat 3" tagged ORG: keep the person, drop the address tail
+            if c.type == "ORGANISATION" and not has_org_indicator(c.text) and " of " in c.text:
+                left = c.text.split(" of ")[0].strip()
+                if parse_person(left).clean.lower() in full_names:
+                    c.text, c.end, c.type = left, c.start + len(left), "PERSON"
+                    parsed[c.id] = parse_person(left)
+                    continue
+            if c.type == "ORGANISATION" and not has_org_indicator(c.text) and " " not in c.text.strip() \
+                    and c.text.lower() in first_names:
+                c.type, c.tier, c.confidence = "PERSON", "uncertain", 0.75
+                parsed[c.id] = parse_person(c.text)
+                continue
+            if c.type == "ORGANISATION" and not has_org_indicator(c.text):
+                p = parse_person(c.text)
+                if p.honorific or (p.surname and p.surname.lower() in confirmed):
+                    c.type = "PERSON"
+                    parsed[c.id] = p
+        return parsed
+
+    def _drop_ordinary_words(self, cands: List[DetectedEntity], ner_ids: Set[str], parsed: Dict[str, PersonName],
+                             doc_lower_words: Set[str], blocks: Dict[str, str]) -> List[DetectedEntity]:
+        """
+        Drop uncorroborated NER guesses that the document itself shows are ordinary words:
+          - a single-word PERSON guess whose word also appears in lower case ('Request' when the
+            document says 'this request'), unless it is a known first name or surname of someone
+          - an uncertain ORG guess whose content words mostly appear in lower case
+            ('Surcharge', 'Gmail - Your Immigration Health Surcharge')
+          - an uncertain ALL-CAPS ORG guess that the document defines as the initials of
+            lower-case words ('immigration health surcharge (IHS)')
+        Organisations with a legal suffix, and anything a rule (honorific, role, pattern) found,
+        are never dropped here.
+        """
+        # First names and surnames the document confirms (rule-based finds, or any full name)
+        known_names: Set[str] = set()
+        for c in cands:
+            if c.type != "PERSON":
+                continue
+            p = parsed.get(c.id) or parse_person(c.text)
+            if c.id not in ner_ids or p.is_full:
+                known_names.update(x.lower() for x in (p.first, p.surname) if x)
+        all_text = "\n".join(blocks.values())
+        place_words = {w for c in cands if c.type == "PHYSICAL_ADDRESS" for w in re.findall(r"[A-Z][a-z]+", c.text)}
+
+        def ordinary(word: str) -> bool:
+            return word.lower() in doc_lower_words
+
+        kept = []
+        for c in cands:
+            if c.id not in ner_ids or c.tier != "uncertain":
+                kept.append(c)
+                continue
+            words = [w for w in re.findall(r"[^\W\d_]+", c.text) if len(w) >= 3 and w.lower() not in FUNCTION_WORDS]
+            if c.type == "PERSON" and len(c.text.split()) == 1:
+                if (ordinary(c.text) or c.text in place_words) and c.text.lower() not in known_names:
+                    continue
+            elif c.type == "ORGANISATION":
+                if words and sum(ordinary(w) for w in words) / len(words) >= 0.75:
+                    continue
+                if c.text.isupper() and 2 <= len(c.text) <= 6 and self._is_acronym_of_ordinary_words(c.text, all_text, ordinary):
+                    continue
+            kept.append(c)
+        return kept
+
+    @staticmethod
+    def _is_acronym_of_ordinary_words(acr: str, text: str, ordinary) -> bool:
+        n = len(acr)
+        rx = re.compile(r"((?:[^\W\d_]+[\s\-]+){%d})\(\s*%s\s*\)" % (n, re.escape(acr)))
+        for m in rx.finditer(text):
+            words = re.findall(r"[^\W\d_]+", m.group(1))
+            if "".join(w[0] for w in words).upper() == acr and all(ordinary(w) for w in words):
+                return True
+        return False
+
+    # ------------------------------------------------------------------------------------------
+    # 4. People: clustering and aliases
+    # ------------------------------------------------------------------------------------------
+    @staticmethod
+    def _cluster_people(cands: List[DetectedEntity], parsed: Dict[str, PersonName], blocks: Dict[str, str]):
+        """
+        Group person mentions into individuals by surname, then by first name. Titled mentions
+        ('Mrs Patel') join the single compatible full-name cluster; if two are compatible the
+        mention is left uncertain rather than guessed. Initials pick between same-surname people.
+        """
+        by_surname: Dict[str, List[DetectedEntity]] = {}
+        for c in cands:
+            if c.type == "PERSON":
+                p = parsed.setdefault(c.id, parse_person(c.text))
+                by_surname.setdefault((p.surname or p.clean).lower(), []).append(c)
+
+        clusters: List[PersonCluster] = []
+        assignment: Dict[str, PersonCluster] = {}
+
+        def new_cluster(key: str, members: List[DetectedEntity], tier: str = "confident") -> PersonCluster:
+            ps = [parsed[m.id] for m in members]
+            canonical = max(members, key=lambda m: len(m.text)).text
+            first = next((p.first for p in ps if p.first), None)
+            cl = PersonCluster(cluster_id=f"cluster_{key}_{len(clusters)}", canonical_name=canonical,
+                               surname=ps[0].surname or key, first_name=first,
+                               initials={p.initial for p in ps if p.initial},
+                               gender=next((p.gender for p in ps if p.gender != "U"), "U"),
+                               tier=tier, confidence=max(m.confidence for m in members))
+            clusters.append(cl)
+            for m in members:
+                assignment[m.id] = cl
+            return cl
+
+        def uncertain(c: DetectedEntity) -> None:
+            c.tier, c.confidence = "uncertain", 0.70
+
+        for skey, members in by_surname.items():
+            full: Dict[str, List[DetectedEntity]] = {}
+            titled: Dict[str, List[DetectedEntity]] = {}
+            bare: List[DetectedEntity] = []
+            for c in members:
+                p = parsed[c.id]
+                if p.is_full and p.first:
+                    full.setdefault(p.first.lower(), []).append(c)
+                elif p.honorific:
+                    titled.setdefault(p.honorific.lower(), []).append(c)
+                else:
+                    bare.append(c)
+
+            made: List[PersonCluster] = []
+            if full:
+                made = [new_cluster(f"{skey}_{fk}", ms) for fk, ms in full.items()]
+                for title_key, ms in titled.items():
+                    g = TITLE_GENDER.get(title_key, "U")
+                    compatible = [cl for cl in made if g == "U" or cl.gender in ("U", g)]
+                    for c in ms:
+                        if len(compatible) == 1 and not is_relative_mention(blocks.get(c.block_id, ""), c.start, c.end):
+                            if g != "U" and compatible[0].gender == "U":
+                                compatible[0].gender = g
+                            assignment[c.id] = compatible[0]
+                        else:
+                            uncertain(c)
+            elif titled:
+                genders = {TITLE_GENDER.get(t, "U") for t in titled} - {"U"}
+                if len(genders) <= 1:
+                    made = [new_cluster(f"{skey}_titled", [c for ms in titled.values() for c in ms])]
+                else:
+                    made = [new_cluster(f"{skey}_{t}", ms) for t, ms in titled.items()]
+            elif bare:
+                tier = "confident" if any(c.tier == "confident" for c in bare) else "uncertain"
+                cl = new_cluster(f"{skey}_bare", bare, tier)
+                cl.cluster_id += "_bare"
+                continue
+
+            for c in bare:
+                p = parsed[c.id]
+                by_initial = [cl for cl in made if p.initial and p.initial in cl.initials]
+                target = by_initial[0] if len(by_initial) == 1 else (made[0] if len(made) == 1 else None)
+                if target:
+                    assignment[c.id] = target
+                else:
+                    uncertain(c)
+
+        by_first: Dict[str, List[PersonCluster]] = {}
+        for cl in clusters:
+            if cl.first_name:
+                by_first.setdefault(cl.first_name.lower(), []).append(cl)
+        for cl in [c for c in clusters if c.cluster_id.endswith("_bare")]:
+            owners = by_first.get(cl.surname.lower(), [])
+            if len(owners) == 1 and " " not in cl.surname:
+                for eid, assigned in list(assignment.items()):
+                    if assigned is cl:
+                        assignment[eid] = owners[0]
+                clusters.remove(cl)
+        return clusters, assignment
+
+    @staticmethod
+    def _person_aliases(blocks: Dict[str, str], clusters: List[PersonCluster], assignment: Dict[str, PersonCluster]) -> List[DetectedEntity]:
+        """
+        Find every further mention of each person: surname alone, with an honorific, with an
+        initial, and the first name alone when no one else in the document shares it. Matches
+        are in the name's own case or in capitals only. A gendered honorific that contradicts the
+        person ('Mrs Hale' next to 'Mr Daniel Hale') is a different person and is kept apart.
+        """
+        out: List[DetectedEntity] = []
+        surname_count: Dict[str, int] = {}
+        first_count: Dict[str, int] = {}
+        for cl in clusters:
+            surname_count[cl.surname.lower()] = surname_count.get(cl.surname.lower(), 0) + 1
+            if cl.first_name:
+                first_count[cl.first_name.lower()] = first_count.get(cl.first_name.lower(), 0) + 1
+
+        titles = ["Mr", "Mrs", "Ms", "Miss", "Dr", "Prof", "Lord", "Lady", "Sir", "Master", "Dame"]
+        for cl in clusters:
+            if len(cl.surname.replace(" ", "")) < 3:
+                continue
+            shared = surname_count[cl.surname.lower()] > 1
+            forms = {cl.surname} | {f"{t}{d} {cl.surname}" for t in titles for d in ("", ".")}
+            forms |= {f"{i}{sep}{cl.surname}" for i in cl.initials for sep in (". ", ".", " ")}
+            if cl.first_name:
+                forms.add(f"{cl.first_name} {cl.surname}")
+
+            for bid, text in blocks.items():
+                for form in forms:
+                    for m in name_occurrences(text, form):
+                        p = parse_person(m.group())
+                        conf, tier, target = min(0.90, cl.confidence), cl.tier, cl
+                        if p.initial and p.initial not in cl.initials:
+                            continue                                    # another person's initial
+                        g = TITLE_GENDER.get((p.honorific or "").lower(), "U")
+                        if p.honorific and not p.first and is_relative_mention(text, m.start(), m.end()):
+                            target, tier, conf = None, "uncertain", 0.70   # 'his wife, Mrs Vance'
+                        elif g != "U" and cl.gender not in ("U", g):
+                            target, tier, conf = None, "uncertain", 0.70   # gender contradicts: a different person
+                        elif shared and not p.first and not p.initial:
+                            same = [c for c in clusters if c.surname.lower() == cl.surname.lower() and g != "U" and c.gender == g]
+                            target = same[0] if len(same) == 1 else None
+                            if target is None:
+                                tier, conf = "uncertain", 0.70
+                        ent = _entity(bid, m.start(), m.end(), m.group(), "PERSON", conf, tier)
+                        out.append(ent)
+                        if target:
+                            assignment[ent.id] = target
+
+            if cl.first_name and len(cl.first_name) >= 3 and first_count.get(cl.first_name.lower()) == 1:
+                for bid, text in blocks.items():
+                    for m in name_occurrences(text, cl.first_name):
+                        ent = _entity(bid, m.start(), m.end(), m.group(), "PERSON", 0.75, "uncertain")
+                        out.append(ent)
+                        assignment[ent.id] = cl
+        return out
+
+    @staticmethod
+    def _defined_term_aliases(blocks: Dict[str, str], cands: List[DetectedEntity], assignment: Dict[str, PersonCluster],
+                              alias_of: Dict[str, str]) -> List[DetectedEntity]:
+        """
+        'Ashworth Care Homes Limited ("Ashworth")': the defined short name is an alias of the full
+        name, so every later 'Ashworth' gets the same placeholder. Only a term that shares words or
+        initials with the full name counts; role terms such as ("the Company") are not aliases.
+        """
+        out: List[DetectedEntity] = []
+        for c in cands:
+            if c.type not in ("PERSON", "ORGANISATION"):
+                continue
+            m = _DEFINED_TERM.match(blocks.get(c.block_id, "")[c.end:])
+            if not m or m.group(1):
+                continue
+            term = m.group(2).strip()
+            full_words = re.findall(r"[^\W_]+", c.text)
+            term_words = re.findall(r"[^\W_]+", term)
+            initials = "".join(w[0] for w in full_words if w[0].isupper()).upper()
+            if not term_words or not (set(w.lower() for w in term_words) <= set(w.lower() for w in full_words) or term.upper() == initials):
+                continue
+            for bid, text in blocks.items():
+                for occ in name_occurrences(text, term):
+                    ent = _entity(bid, occ.start(), occ.end(), occ.group(), c.type, 0.90)
+                    out.append(ent)
+                    if c.type == "PERSON" and c.id in assignment:
+                        assignment[ent.id] = assignment[c.id]
+                    alias_of[ent.id] = c.text
+        return out
+
+    @staticmethod
+    def _org_aliases(blocks: Dict[str, str], cands: List[DetectedEntity]) -> List[DetectedEntity]:
+        """'Halden' wherever 'Halden Logistics Ltd' was found."""
+        stems = {org_stem(c.text) for c in cands if c.type == "ORGANISATION" and has_org_indicator(c.text)}
+        out = []
+        for stem in stems:
+            if len(stem) < 3 or stem.lower() in FUNCTION_WORDS:
+                continue
+            for bid, text in blocks.items():
+                for m in name_occurrences(text, stem):
+                    out.append(_entity(bid, m.start(), m.end(), m.group(), "ORGANISATION", 0.85, "uncertain"))
+        return out
+
+    # ------------------------------------------------------------------------------------------
+    # 6. Placeholders and 7. propagation
+    # ------------------------------------------------------------------------------------------
+    @staticmethod
+    def _allocate(kept: List[DetectedEntity], assignment: Dict[str, PersonCluster], block_order: Dict[str, int],
+                  alias_of: Dict[str, str]) -> None:
+        """Numbered in reading order, from each span's final type."""
+        registry = EntityRegistry()
+        for e in sorted(kept, key=lambda e: (block_order.get(e.block_id, 0), e.start)):
+            if e.type == "PERSON":
+                cl = assignment.get(e.id)
+                key = f"cluster:{cl.cluster_id}" if cl else f"text:{' '.join(alias_of.get(e.id, e.text).lower().split())}"
+            elif e.type == "ORGANISATION":
+                key = org_stem(alias_of.get(e.id, e.text))
+            else:
+                key = re.sub(r"[\s\-]", "", e.text)
+            e.canonical_id, e.placeholder = registry.allocate(e.type, key)
+
+    @staticmethod
+    def _propagate(kept: List[DetectedEntity], blocks: Dict[str, str], public: Dict[str, List[Tuple[int, int]]]) -> List[DetectedEntity]:
+        """
+        Mask every other occurrence of each detected value with the same placeholder. Without
+        this, NER tags 'IHS' in two places and misses three, and the outbound gate then blocks on
+        the three it can see (lawyer test, IHS email).
+        """
+        taken: Dict[str, List[Tuple[int, int]]] = {}
+        for e in kept:
+            taken.setdefault(e.block_id, []).append((e.start, e.end))
+        seen: Set[Tuple[str, str]] = set()
+        added: List[DetectedEntity] = []
+        for e in sorted(kept, key=lambda e: -len(e.text)):          # longest first, so 'Halden Ltd' beats 'Halden'
+            key = (e.type, e.text)
+            if key in seen or len(e.text.strip()) < 2:
+                continue
+            seen.add(key)
+            for bid, text in blocks.items():
+                if e.type in ("PERSON", "ORGANISATION"):
+                    hits = name_occurrences(text, e.text)
+                else:
+                    hits = re.finditer(rf"(?<![\w@.]){re.escape(e.text)}(?![\w@])", text)
+                for m in hits:
+                    span = m.span()
+                    if any(_overlaps(span, t) for t in taken.get(bid, [])):
+                        continue
+                    if e.type in ("PERSON", "ORGANISATION") and any(_overlaps(span, p) for p in public.get(bid, [])):
+                        continue
+                    copy = e.model_copy(update={"id": f"ent_{uuid.uuid4().hex[:10]}", "block_id": bid, "start": span[0],
+                                                "end": span[1], "text": m.group(), "surface_forms": list(e.surface_forms)})
+                    added.append(copy)
+                    taken.setdefault(bid, []).append(span)
+        return added
+
+    @staticmethod
+    def _surface_forms(kept: List[DetectedEntity], assignment: Dict[str, PersonCluster]) -> None:
+        for e in kept:
+            forms = list(e.surface_forms or [e.text])
+            if e.type == "PERSON":
+                cl = assignment.get(e.id)
+                forms += sorted(person_forms(cl.canonical_name if cl else e.text))
+            elif e.type == "ORGANISATION":
+                stem = org_stem(e.text)
+                if stem != e.text:
+                    forms.append(stem)
+            e.surface_forms = list(dict.fromkeys(f for f in forms if f))
+
+    # ------------------------------------------------------------------------------------------
+    # 5. Overlap resolution
+    # ------------------------------------------------------------------------------------------
+    def _deduplicate_spans(self, entities: List[DetectedEntity], block_texts: Dict[str, str]) -> List[DetectedEntity]:
+        """
+        Resolve overlapping spans per block. Structured values (NI, DOB, references...) always win
+        and can never be swallowed; a name span that runs into one is trimmed before it.
+        """
+        by_block: Dict[str, List[DetectedEntity]] = {}
         for ent in entities:
-            blocks_map.setdefault(ent.block_id, []).append(ent)
+            by_block.setdefault(ent.block_id, []).append(ent)
 
         result: List[DetectedEntity] = []
-        for block_id, ent_list in blocks_map.items():
-            block_text = block_texts.get(block_id, "")
-
-            # 1. Carve out protection for structured patterns
-            struct_ents = [e for e in ent_list if e.type in PATTERNS]
-            cleaned_ents: List[DetectedEntity] = []
-
-            for ent in ent_list:
+        for block_id, ents in by_block.items():
+            text = block_texts.get(block_id, "")
+            structured = [e for e in ents if e.type in PATTERNS]
+            cleaned: List[DetectedEntity] = []
+            for ent in ents:
                 if ent.type in PATTERNS:
-                    cleaned_ents.append(ent)
+                    cleaned.append(ent)
                     continue
+                hit = next((s for s in structured if _overlaps((ent.start, ent.end), (s.start, s.end))), None)
+                if hit is None:
+                    cleaned.append(ent)
+                elif ent.start < hit.start:
+                    trimmed = text[ent.start:hit.start].strip()
+                    if len(trimmed) >= 3 and trimmed.lower() not in ("dob", "date of birth", "date", "tel", "acc", "account"):
+                        ent.end, ent.text = ent.start + len(trimmed), trimmed
+                        cleaned.append(ent)
 
-                # Check overlap with any structured pattern
-                collides = False
-                for s in struct_ents:
-                    if max(ent.start, s.start) < min(ent.end, s.end):
-                        # Collision: non-structured span overlaps with structured pattern
-                        collides = True
-                        if ent.start < s.start:
-                            trimmed_end = s.start
-                            trimmed_text = block_text[ent.start:trimmed_end].strip()
-                            if len(trimmed_text) >= 3 and trimmed_text.lower() not in ("dob", "date of birth", "date", "tel", "acc", "account"):
-                                ent.end = trimmed_end
-                                ent.text = trimmed_text
-                                cleaned_ents.append(ent)
-                        break
-
-                if not collides:
-                    cleaned_ents.append(ent)
-
-            # 2. Sort key: start ascending, structured priority, higher confidence, longer span (-len)
-            def sort_key(x: DetectedEntity) -> Tuple[int, int, float, int]:
-                is_struct = 0 if x.type in PATTERNS else 1
-                span_len = x.end - x.start
-                return (x.start, is_struct, -x.confidence, -span_len)
-
-            sorted_ents = sorted(cleaned_ents, key=sort_key)
+            cleaned.sort(key=lambda x: (x.start, 0 if x.type in PATTERNS else 1, -x.confidence, -(x.end - x.start)))
             merged: List[DetectedEntity] = []
-
-            for ent in sorted_ents:
-                if not merged:
+            for ent in cleaned:
+                if not merged or ent.start >= merged[-1].end:
                     merged.append(ent)
                     continue
-
                 prev = merged[-1]
-                # Case 1: No overlap
-                if ent.start >= prev.end:
-                    merged.append(ent)
-                    continue
-
-                # Case 2: ent is completely enclosed in prev
-                if ent.start >= prev.start and ent.end <= prev.end:
-                    # If ent is structured pattern and prev is not, structured pattern replaces prev!
+                if ent.end <= prev.end:                                   # enclosed
                     if ent.type in PATTERNS and prev.type not in PATTERNS:
                         merged[-1] = ent
-                    elif ent.confidence > prev.confidence and ent.start == prev.start and ent.end == prev.end:
+                    elif ent.confidence > prev.confidence and (ent.start, ent.end) == (prev.start, prev.end):
                         merged[-1] = ent
                     else:
-                        if ent.text not in prev.surface_forms:
-                            prev.surface_forms.append(ent.text)
-                        for sf in ent.surface_forms:
-                            if sf not in prev.surface_forms:
-                                prev.surface_forms.append(sf)
+                        prev.surface_forms = list(dict.fromkeys(prev.surface_forms + [ent.text] + ent.surface_forms))
                     continue
-
-                # Case 3: Partial overlap with extension (ent.start < prev.end and ent.end > prev.end)
-                if prev.type in PATTERNS or ent.type in PATTERNS:
-                    # Structured patterns cannot be merged into an organisation or generic span
+                if prev.type in PATTERNS or ent.type in PATTERNS:          # partial overlap with a structured value
                     if prev.type in PATTERNS:
                         ent.start = prev.end
-                        ent.text = block_text[ent.start:ent.end].strip()
+                        ent.text = text[ent.start:ent.end].strip()
                         if len(ent.text) >= 3:
                             merged.append(ent)
                     else:
                         prev.end = ent.start
-                        prev.text = block_text[prev.start:prev.end].strip()
+                        prev.text = text[prev.start:prev.end].strip()
+                        prev.end = prev.start + len(prev.text)
                         if len(prev.text) < 3:
                             merged[-1] = ent
                         else:
                             merged.append(ent)
                     continue
-
-                # Merge non-structured spans
-                new_start = min(prev.start, ent.start)
-                new_end = max(prev.end, ent.end)
-                new_text = block_text[new_start:new_end] if block_text else ent.text
-
-                has_prev_org_ind = any(ind in prev.text.lower() for ind in ORG_INDICATORS)
-                has_ent_org_ind = any(ind in ent.text.lower() for ind in ORG_INDICATORS)
-
-                if has_prev_org_ind or has_ent_org_ind or prev.type == "ORGANISATION" or ent.type == "ORGANISATION":
-                    dominant_type = "ORGANISATION"
-                    conf = max(prev.confidence, ent.confidence)
-                    tier = "confident" if (has_prev_org_ind or has_ent_org_ind) else "uncertain"
+                # Partial overlap of two name spans: merge
+                new_start, new_end = min(prev.start, ent.start), max(prev.end, ent.end)
+                new_text = text[new_start:new_end] if text else ent.text
+                org_word = has_org_indicator(prev.text) or has_org_indicator(ent.text)
+                if org_word or "ORGANISATION" in (prev.type, ent.type):
+                    dom_type, conf, tier = "ORGANISATION", max(prev.confidence, ent.confidence), ("confident" if org_word else "uncertain")
                 else:
-                    if prev.confidence >= ent.confidence:
-                        dominant_type = prev.type
-                        conf = prev.confidence
-                        tier = prev.tier
-                    else:
-                        dominant_type = ent.type
-                        conf = ent.confidence
-                        tier = ent.tier
-
-                combined_surfaces = list(dict.fromkeys(prev.surface_forms + ent.surface_forms + [new_text, prev.text, ent.text]))
-
-                prev.start = new_start
-                prev.end = new_end
-                prev.text = new_text
-                prev.type = dominant_type
-                prev.confidence = conf
-                prev.tier = tier
-                prev.surface_forms = combined_surfaces
-
+                    best = prev if prev.confidence >= ent.confidence else ent
+                    dom_type, conf, tier = best.type, best.confidence, best.tier
+                prev.surface_forms = list(dict.fromkeys(prev.surface_forms + ent.surface_forms + [new_text, prev.text, ent.text]))
+                prev.start, prev.end, prev.text = new_start, new_end, new_text
+                prev.type, prev.confidence, prev.tier = dom_type, conf, tier
             result.extend(merged)
-
         return result

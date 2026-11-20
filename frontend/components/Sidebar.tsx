@@ -152,14 +152,47 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   }`}
                 >
                   <div className="flex items-center space-x-2 truncate">
-                    <ShieldCheck className="w-3.5 h-3.5 text-indigo-600" />
-                    <span className="truncate">Redaction Studio</span>
+                    <Layers className="w-3.5 h-3.5 text-indigo-600" />
+                    <span className="truncate">1. Review & Redact</span>
                   </div>
                   {activeEntitiesCount > 0 && (
                     <span className="text-[10px] bg-amber-100 text-amber-900 px-1.5 py-0.2 rounded font-mono font-medium">
                       {activeEntitiesCount}
                     </span>
                   )}
+                </button>
+
+                <button
+                  onClick={() => onSelectView('redacted_only')}
+                  className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-md transition-colors cursor-pointer ${
+                    activeView === 'redacted_only'
+                      ? 'bg-[#efefed] font-semibold text-[#37352f]'
+                      : 'text-[#5f5e5b] hover:bg-[#efefed] hover:text-[#37352f]'
+                  }`}
+                >
+                  <div className="flex items-center space-x-2 truncate">
+                    <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+                    <span className="truncate">2. Redacted Document</span>
+                  </div>
+                </button>
+
+                <button
+                  onClick={() => onSelectView('ai')}
+                  disabled={aiLocked}
+                  title={aiLocked ? 'Complete the review and resolve intake notices before using AI' : undefined}
+                  className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-md transition-colors ${aiLocked ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'} ${
+                    activeView === 'ai'
+                      ? 'bg-[#efefed] font-semibold text-[#37352f]'
+                      : 'text-[#5f5e5b] hover:bg-[#efefed] hover:text-[#37352f]'
+                  }`}
+                >
+                  <div className="flex items-center space-x-2">
+                    <Bot className="w-3.5 h-3.5 text-purple-600" />
+                    <span>3. AI Legal Studio</span>
+                  </div>
+                  <span className="text-[9px] bg-purple-100 text-purple-800 px-1.5 py-0.2 rounded font-semibold">
+                    1-Click
+                  </span>
                 </button>
 
                 <button
@@ -175,25 +208,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     <span>Entity Database</span>
                   </div>
                   <span className="text-[10px] text-[#787774]">Table</span>
-                </button>
-
-                <button
-                  onClick={() => onSelectView('ai')}
-                  disabled={aiLocked}
-                  title={aiLocked ? 'Complete the review and resolve intake notices before using AI' : undefined}
-                  className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-md transition-colors ${aiLocked ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'} ${
-                    activeView === 'ai'
-                      ? 'bg-[#efefed] font-semibold text-[#37352f]'
-                      : 'text-[#5f5e5b] hover:bg-[#efefed] hover:text-[#37352f]'
-                  }`}
-                >
-                  <div className="flex items-center space-x-2">
-                    <Bot className="w-3.5 h-3.5 text-purple-600" />
-                    <span>AI Copilot</span>
-                  </div>
-                  <span className="text-[9px] bg-purple-100 text-purple-800 px-1.5 py-0.2 rounded font-semibold">
-                    1-Click
-                  </span>
                 </button>
               </>
             )}

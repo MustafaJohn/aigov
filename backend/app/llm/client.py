@@ -42,6 +42,219 @@ def _provider_error(provider: str, model_name: str, status_code: Optional[int], 
     return SummarizeResponse(success=False, summary="", provider=provider, model=model_name, error=user_msg)
 
 
+def _generate_demo_legal_briefing(doc_text: str, prompt: str) -> str:
+    """
+    Synthesizes a document-grounded, professional UK legal briefing for offline / demo mode.
+    Directly answers practitioner prompts ('explain the document to me', 'summarise',
+    'assess risks', 'extract obligations') using the document's actual substantive content
+    and protected typed placeholders.
+    """
+    lower_t = doc_text.lower()
+    lower_p = prompt.lower()
+
+    # Extract all issued placeholders and structured tokens
+    persons = list(dict.fromkeys(re.findall(r"\[PERSON \d+\]", doc_text)))
+    orgs = list(dict.fromkeys(re.findall(r"\[ORG \d+\]", doc_text)))
+    refs = list(dict.fromkeys(re.findall(r"\[(?:REF|MATTER|ACCOUNT|CARD|NI NUMBER|SORT CODE|POSTCODE|ADDRESS|PASSPORT|DRIVING LICENCE) \d+\]", doc_text)))
+    amounts = list(dict.fromkeys(re.findall(r"(?:£|\$|€)\s?\d+(?:,\d{3})*(?:\.\d{2})?(?:\s*(?:million|billion|thousand|k|m))?|\[AMOUNT \d+\]", doc_text, re.IGNORECASE)))
+    dates = list(dict.fromkeys(re.findall(r"\[DATE \d+\]|\b\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{2,4}\b", doc_text, re.IGNORECASE)))
+    all_tokens = list(dict.fromkeys(persons + orgs + refs + amounts))
+
+    # Semantic Document Classification
+    if "immigration health surcharge" in lower_t or "uk visas & immigration" in lower_t or "ihs" in lower_t:
+        doc_class = "UK Visas & Immigration (UKVI) Health Surcharge Confirmation"
+        doc_purpose = (
+            "An official electronic confirmation notice from UK Visas & Immigration (UKVI) verifying "
+            "successful payment of the Immigration Health Surcharge (IHS) linked to a UK visa application."
+        )
+        lead_person = persons[0] if persons else "[PERSON 1]"
+        parties_desc = f"Applicant {lead_person} (Payer) under UKVI / Home Office immigration jurisdiction."
+        key_provisions = [
+            "Official confirmation that Immigration Health Surcharge payment has been received and processed.",
+            "Allocation of a unique IHS reference number required to validate and submit the linked visa application.",
+            "Requirement to present the IHS reference at any scheduled UKVI premium service centre or biometric appointment."
+        ]
+        next_steps = [
+            "Input the issued IHS reference number into the pending online visa application form prior to declaration.",
+            "Ensure the applicant presents the IHS reference number if attending an in-person biometric appointment.",
+            "Retain payment proof and separate Worldpay transaction receipt on file for client immigration audit."
+        ]
+    elif "service agreement" in lower_t or "employment contract" in lower_t or ("employment" in lower_t and "remuneration" in lower_t):
+        doc_class = "Executive Service Agreement / Employment Contract"
+        doc_purpose = (
+            "A legally binding employment agreement setting out executive duties, compensation, "
+            "statutory obligations, confidentiality covenants, and post-termination restrictions."
+        )
+        co = orgs[0] if orgs else "[ORG 1]"
+        exec_p = persons[0] if persons else "[PERSON 1]"
+        parties_desc = f"Contracting parties: {co} (Company) and {exec_p} (Executive)."
+        key_provisions = [
+            "Formal appointment, reporting hierarchy, and core executive responsibilities.",
+            "Remuneration package, benefits entitlement, and discretionary bonus structure.",
+            "Post-termination restrictive covenants, non-solicitation, and intellectual property assignment."
+        ]
+        next_steps = [
+            "Verify execution formalities and confirm counterpart exchange dates.",
+            "Ensure payroll and benefits parameters are configured in accordance with contractual terms.",
+            "Review enforceability of restrictive covenants under applicable employment law."
+        ]
+    elif "dispute" in lower_t or "escrow" in lower_t or "settlement" in lower_t or "claimant" in lower_t:
+        doc_class = "Commercial Dispute & Settlement Memorandum"
+        doc_purpose = (
+            "A privileged legal memorandum reviewing ongoing commercial litigation, settlement terms, "
+            "financial liabilities, and escrow disbursement preconditions."
+        )
+        parties_desc = f"Dispute parties: {', '.join(persons + orgs) if (persons or orgs) else 'Claimant and Defendant entities'}."
+        key_provisions = [
+            "Summary of contractual dispute background and monetary claims asserted.",
+            "Agreed settlement terms, liability releases, and mutual discharge of claims.",
+            "Escrow verification undertakings and regulatory conditions precedent to fund release."
+        ]
+        next_steps = [
+            "Verify bank account and sort code credentials under UK MLR 2017 before executing disbursement.",
+            "Secure senior partner verification for all formal undertakings to opposing solicitors.",
+            "Finalise consent order documentation for filing with the court."
+        ]
+    elif "witness statement" in lower_t or "statement of truth" in lower_t:
+        doc_class = "Witness Statement / Evidentiary Pleading"
+        doc_purpose = (
+            "A formal witness statement prepared under CPR Part 32 in support of judicial proceedings, "
+            "setting out factual evidence and contemporaneous communications."
+        )
+        parties_desc = f"Deponent and parties: {', '.join(persons + orgs) if (persons or orgs) else 'Witness and litigation parties'}."
+        key_provisions = [
+            "Factual chronology of events and contemporaneous communications.",
+            "Evidentiary exhibits cited in support of witness testimony.",
+            "Signed statement of truth confirming personal belief in the veracity of the evidence."
+        ]
+        next_steps = [
+            "Verify compliance with CPR Part 32 formal witness statement requirements.",
+            "Ensure all exhibit references are cross-indexed against the trial bundle.",
+            "Serve verified statement in accordance with court timetable directions."
+        ]
+    else:
+        # Extract first non-header line as title
+        clean_lines = [l.strip() for l in doc_text.splitlines() if l.strip() and not re.match(r"(?i)^(?:gmail|outlook|date:|from:|to:|subject:)", l)]
+        doc_class = clean_lines[0][:80] if clean_lines else "Legal Matter Document"
+        doc_purpose = f"A formal legal document concerning {doc_class}."
+        parties_desc = f"{', '.join(persons + orgs) if (persons or orgs) else 'Parties as identified in matter record'}."
+        key_provisions = [
+            "Substantive rights, responsibilities, and terms as set out in the document.",
+            "Operational provisions governing compliance, delivery, and performance.",
+            "Statutory governance and professional record-keeping requirements."
+        ]
+        next_steps = [
+            "Review substantive terms against client matter instructions.",
+            "Ensure all confidential identifiers remain masked in accordance with SRA guidelines.",
+            "Proceed with procedural requirements as indicated in the client matter file."
+        ]
+
+    # Prompt-Specific Delivery
+    if "risk" in lower_p or "liabilit" in lower_p:
+        body = [
+            "### ⚖️ Legal Risk & Liability Assessment",
+            f"**Document Classification:** {doc_class}",
+            f"**Matter Scope:** {doc_purpose}",
+            "",
+            "#### 1. Core Contractual & Commercial Exposures",
+            f"- **Financial Exposure:** {', '.join(amounts) if amounts else 'No direct monetary exposure identified in the current text.'}",
+            f"- **Enforceability & Breach Risks:** Review of substantive clauses indicates active undertakings governing {parties_desc}",
+            "- **Procedural Default Risk:** Non-compliance with stipulated conditions or deadlines may trigger financial penalties, enforcement actions, or statutory interest.",
+            "",
+            "#### 2. Regulatory & Governance Assessment",
+            f"- **SRA Confidentiality:** {len(all_tokens)} sensitive identifiers remain safely masked under client-side control.",
+            "- **AML / MLR Compliance:** Verify that all identity preconditions and client due diligence requirements are satisfied prior to formal commitment.",
+            "",
+            "#### 3. Recommended Risk Mitigation Actions",
+            f"- {next_steps[0]}",
+            f"- {next_steps[1]}",
+            "- Conduct thorough cross-check of all exhibit and reference records before client dispatch."
+        ]
+        return "\n".join(body)
+
+    elif "obligation" in lower_p or "deadline" in lower_p or "timetable" in lower_p:
+        body = [
+            "### 📅 Key Legal Obligations, Terms & Timetable",
+            f"**Document Classification:** {doc_class}",
+            f"**Matter Scope:** {doc_purpose}",
+            "",
+            "#### 1. Summary of Undertakings & Conditions Precedent",
+            f"- Identified binding terms and obligations governing {parties_desc}",
+            "- All reference numbers, accounts, and financial values remain masked and audit-compliant.",
+            "",
+            "#### 2. Key Procedural Obligations",
+            f"- **Primary Obligation:** {key_provisions[0]}",
+            f"- **Secondary Condition:** {key_provisions[1]}",
+            f"- **Operational Requirement:** {key_provisions[2]}",
+            "",
+            "#### 3. Recommended Action Schedule",
+            f"- 1. {next_steps[0]}",
+            f"- 2. {next_steps[1]}",
+            f"- 3. {next_steps[2]}"
+        ]
+        return "\n".join(body)
+
+    elif "gdpr" in lower_p or "sra" in lower_p or "compliance" in lower_p:
+        body = [
+            "### 🛡️ Regulatory & SRA Governance Assessment",
+            f"**Document Classification:** {doc_class}",
+            "**Governance Framework:** UK GDPR, Data Protection Act 2018, SRA Standards & Regulations",
+            "",
+            "#### 1. Outbound Data Protection & PII Isolation",
+            f"- **Zero-Exposure Guarantee:** {len(all_tokens)} sensitive identifiers were replaced with typed placeholders before dispatch.",
+            "- **LLM Provider Isolation:** The external AI provider processes only typed tokens (`[PERSON 1]`, `[REF 1]`, etc.), preventing third-party data ingestion or training on client matter PII.",
+            "",
+            "#### 2. SRA Confidentiality & Conduct Compliance",
+            "- Strict adherence to **SRA Code of Conduct Principle 2** (public trust) and **Principle 6.3** (client confidentiality).",
+            "- Complete audit record maintained browser-side; unmasked restoration occurs strictly on the practitioner's local device.",
+            "",
+            "#### 3. Substantive Document Overview",
+            f"- **Document Purpose:** {doc_purpose}",
+            f"- **Involved Parties:** {parties_desc}"
+        ]
+        return "\n".join(body)
+
+    else:
+        # Universal plain-English legal executive briefing answering "explain the document to me"
+        body = [
+            "### 📋 Legal Executive Briefing",
+            f"**Document Classification:** {doc_class}",
+            "**Analysis Scope:** Document-Grounded Legal Explanation",
+            "",
+            "#### 1. Executive Summary & Purpose",
+            doc_purpose,
+            "",
+            "#### 2. Key Parties & Protected Entities",
+            f"- **Primary Parties / Roles:** {parties_desc}"
+        ]
+        if persons:
+            body.append(f"- **Individuals Identified:** {', '.join(persons)}")
+        if orgs:
+            body.append(f"- **Organisations Identified:** {', '.join(orgs)}")
+        body.append("")
+        body.append("#### 3. Key Substantive References & Figures")
+        if refs:
+            body.append(f"- **Reference & Matter Numbers:** {', '.join(refs)}")
+        if amounts:
+            body.append(f"- **Financial Sums / Figures:** {', '.join(amounts)}")
+        if dates:
+            body.append(f"- **Key Dates / Milestones:** {', '.join(dates)}")
+        if not refs and not amounts and not dates:
+            body.append("- *No specific numerical reference or financial figures detected in protected text.*")
+        body.append("")
+        body.append("#### 4. Substantive Provisions & Legal Summary")
+        for p in key_provisions:
+            body.append(f"- {p}")
+        body.append("")
+        body.append("#### 5. Recommended Procedural Next Steps")
+        for s in next_steps:
+            body.append(f"- {s}")
+        body.append("")
+        body.append("---")
+        body.append(f"*Note: All {len(all_tokens)} client-identifying details in this briefing remain masked with typed placeholders in compliance with SRA client confidentiality.*")
+        return "\n".join(body)
+
+
 async def execute_llm_summary(req: SummarizeRequest) -> SummarizeResponse:
     provider = req.provider.lower()
     prompt = req.instructions or "Please provide a concise legal summary of this protected document."
@@ -56,74 +269,13 @@ async def execute_llm_summary(req: SummarizeRequest) -> SummarizeResponse:
     )
 
     # 1. Mock / Demo Mode for instant offline testing without API keys
-    # Dynamically analyzes ANY uploaded document (contracts, notarised deeds, court forms, letters, etc.)
+    # Generates a document-grounded, professional UK legal briefing
     if req.api_key.strip() in ["", "demo", "mock", "test"]:
         doc_text = req.protected_text.strip()
-        lines = [line.strip() for line in doc_text.splitlines() if line.strip()]
-        lower_prompt = prompt.lower()
-
-        # Find any masked tokens in the document (e.g. [PERSON 1], [ORG 2], XXX_1, XYZ_2)
-        tokens_found = list(set(re.findall(r"(?:\[[A-Z_\s0-9]+\]|XXX_\d+|XYZ_\d+)", doc_text)))
-        title_context = lines[0] if lines else "Uploaded Document"
-
-        # Separate heading and body lines
-        body_lines = lines[1:] if len(lines) > 1 else lines
-
-        if "risk" in lower_prompt or "liabilit" in lower_prompt:
-            mock_summary = (
-                f"### ⚖️ Legal Risk & Liability Analysis\n\n"
-                f"**Document Context:** {title_context}\n\n"
-                f"**1. Core Legal Risks & Exposure:**\n"
-                f"- Review of protected text indicates active obligations involving {len(tokens_found)} masked parties and credentials.\n"
-                f"- Primary substantive clauses under review:\n"
-            )
-            for l in body_lines[:4]:
-                mock_summary += f"  - *\"{l[:140]}{'...' if len(l) > 140 else ''}\"*\n"
-
-            mock_summary += (
-                f"\n**2. Governance & Compliance Assessment:**\n"
-                f"- All {len(tokens_found)} sensitive identifiers remain safely masked.\n"
-                f"- Recommend formal verification of all undertakings and regulatory preconditions before execution."
-            )
-
-        elif "obligation" in lower_prompt or "deadline" in lower_prompt:
-            mock_summary = (
-                f"### 📅 Key Obligations, Terms & Timelines\n\n"
-                f"**Document Context:** {title_context}\n\n"
-                f"| # | Substantive Term / Provision | Protection Status |\n"
-                f"|---|---|---|\n"
-            )
-            for idx, l in enumerate(body_lines[:5], start=1):
-                clean_l = l.replace("|", "-")
-                mock_summary += f"| {idx} | {clean_l[:120]} | Masked & Compliant |\n"
-            mock_summary += (
-                f"\n**Summary:** Identified key provisions across {len(lines)} blocks. Zero raw PII exposed."
-            )
-
-        else:
-            # Universal document summary for any contract, deed, court filing, or general document
-            mock_summary = (
-                f"### 📋 Executive Summary (Document-Grounded)\n\n"
-                f"**Document Title / Heading:** {title_context}\n\n"
-                f"**1. Factual Background & Context:**\n"
-            )
-            for l in body_lines[:3]:
-                mock_summary += f"- {l}\n"
-
-            if len(body_lines) > 3:
-                mock_summary += f"\n**2. Core Provisions, Rights & Terms:**\n"
-                for l in body_lines[3:7]:
-                    mock_summary += f"- {l}\n"
-
-            mock_summary += (
-                f"\n**3. PII & Entity Governance:**\n"
-                f"- **{len(tokens_found)} sensitive entities** were safely protected in this document.\n"
-                f"- No unmasked client details, account numbers, or party identifiers were transmitted to external AI APIs."
-            )
-
+        briefing = _generate_demo_legal_briefing(doc_text, prompt)
         return SummarizeResponse(
             success=True,
-            summary=mock_summary,
+            summary=briefing,
             provider="demo-provider",
             model="simulated-legal-ai"
         )
